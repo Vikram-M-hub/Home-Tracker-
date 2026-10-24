@@ -40,7 +40,7 @@ async function start() {
       {id:"raj",name:"Raj Sharma",email:"raj@example.com",role:"member",activated:true},
     ];
     state.tasks = [
-      {id:"t1",title:"Pick up the documents from the bank",assignee_id:"sam",assignee:people[0],due_date:new Date(Date.now()+86400000).toISOString().slice(0,10),priority:"high",note:"Ask for the stamped copy at the counter.",status:"todo"},
+      {id:"t1",title:"Pick up the documents from the bank",assignee_id:"sam",original_assignee_id:"sam",assignee:people[0],due_date:new Date(Date.now()+86400000).toISOString().slice(0,10),priority:"high",note:"Ask for the stamped copy at the counter.",status:"todo"},
       {id:"t2",title:"Pay the electricity bill",assignee_id:"sam",assignee:people[0],due_date:new Date().toISOString().slice(0,10),priority:"normal",note:"",status:"in_progress"},
       {id:"t3",title:"Pick up fresh vegetables",assignee_id:"asha",assignee:people[1],due_date:new Date().toISOString().slice(0,10),priority:"normal",note:"Tomatoes, spinach and potatoes.",status:"todo"},
       {id:"t4",title:"Book the plumber for Saturday",assignee_id:"raj",assignee:people[2],due_date:new Date(Date.now()+2*86400000).toISOString().slice(0,10),priority:"normal",note:"",status:"todo"},
@@ -165,8 +165,13 @@ function renderTasks() {
   $$(".task-check").forEach(button => button.addEventListener("click", () => updateStatus(button.dataset.task, button.dataset.next)));
 }
 async function updateStatus(id, status) {
-  if (previewMode) { state.tasks.find(t => t.id === id).status=status; renderTasks(); showToast("Task updated"); return; }
-  try { await api(`/api/tasks/${id}`, {method:"PATCH", body:JSON.stringify({status})}); await loadTasks(); }
+  if (previewMode) {
+    const task=state.tasks.find(t=>t.id===id);
+    if(status==="done"&&task.status!=="done"){task.original_assignee_id??=task.assignee_id;task.assignee_id=state.me.id;task.completed_by=state.me.id;}
+    else if(task.status==="done"&&status!=="done"){task.assignee_id=task.original_assignee_id??task.assignee_id;task.completed_by=null;}
+    task.status=status;task.assignee=state.members.find(m=>m.id===task.assignee_id);renderTasks();showToast(status==="done"?`Completed · now assigned to ${state.me.name.split(" ")[0]}`:"Reopened · returned to the original assignee");return;
+  }
+  try { await api(`/api/tasks/${id}`, {method:"PATCH", body:JSON.stringify({status})}); await loadTasks(); showToast(status==="done"?`Completed · now assigned to ${state.me.name.split(" ")[0]}`:"Reopened · returned to the original assignee"); }
   catch (e) { showToast(e.message); }
 }
 function setView(view) {

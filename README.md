@@ -18,7 +18,7 @@ Open http://127.0.0.1:8000 and create the household. The organizer chooses a PIN
 ## Features
 
 - Guided household setup, profiles, private copyable setup links, and per-person PINs.
-- Personal task list and shared family board, assignees, due dates, priorities, notes, and progress updates.
+- Personal task list and shared family board, assignees, due dates, priorities, notes, and progress updates. When someone completes another member’s task, the completed task moves to that person; reopening it returns it to its original assignee.
 - Responsive blue and white interface, saved dark mode, large mobile controls, and bottom navigation.
 - Optional email alerts for invitations, new assignments, and due-date reminders.
 

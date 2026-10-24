@@ -366,7 +366,7 @@ def create_task(payload: TaskInput, request: Request) -> dict[str, Any]:
     assignee = next((m for m in data["members"] if m["id"] == payload.assignee_id), None)
     if not assignee:
         raise HTTPException(status_code=422, detail="Choose a member of this household")
-    task = {"id": str(uuid4()), "title": payload.title.strip(), "assignee_id": payload.assignee_id, "created_by": member["id"], "due_date": payload.due_date.isoformat() if payload.due_date else None, "priority": payload.priority, "note": payload.note.strip(), "status": "todo", "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": []}
+    task = {"id": str(uuid4()), "title": payload.title.strip(), "assignee_id": payload.assignee_id, "original_assignee_id": payload.assignee_id, "created_by": member["id"], "due_date": payload.due_date.isoformat() if payload.due_date else None, "priority": payload.priority, "note": payload.note.strip(), "status": "todo", "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": []}
     data["tasks"].append(task)
     save_data(data)
     email_sent = send_email(assignee["email"], f"New family task: {task['title']}", f"{member['name']} assigned you a task.\n\n{task['title']}\nDue: {task['due_date'] or 'No due date'}\n\nOpen your family dashboard to see the details.")
@@ -379,6 +379,14 @@ def update_task(task_id: str, payload: TaskUpdate, request: Request) -> dict[str
     task = next((t for t in data["tasks"] if t["id"] == task_id), None)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    previous_status = task["status"]
+    if payload.status == "done" and previous_status != "done":
+        task.setdefault("original_assignee_id", task["assignee_id"])
+        task["completed_by"] = member["id"]
+        task["assignee_id"] = member["id"]
+    elif previous_status == "done" and payload.status != "done":
+        task["assignee_id"] = task.get("original_assignee_id", task["assignee_id"])
+        task.pop("completed_by", None)
     task["status"] = payload.status
     task["updated_at"] = now_iso()
     save_data(data)
