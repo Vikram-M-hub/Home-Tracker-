@@ -122,11 +122,20 @@
   <dialog id="member-dialog" class="task-dialog member-dialog">
     <form id="member-form" class="dialog-form">
       <div class="dialog-top"><div><div class="eyebrow">GROW YOUR FAMILY SPACE</div><h2>Add a family member</h2></div><button id="close-member-dialog" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
-      <p class="invite-copy">We’ll email them a private link so they can choose their own PIN.</p>
+      <p class="invite-copy">We’ll create a private setup link to share by WhatsApp or text. They’ll choose their own PIN.</p>
       <label>Name<input name="name" required maxlength="60" placeholder="e.g. Asha"></label>
       <label>Email<input name="email" type="email" required maxlength="254" placeholder="asha@example.com"></label>
       <button class="button button-primary button-wide" type="submit">Add to our family <span>→</span></button>
     </form>
+  </dialog>
+  <dialog id="invite-link-dialog" class="task-dialog invite-link-dialog">
+    <div class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">PROFILE SETUP</div><h2>Share a setup link</h2></div><button id="close-invite-link" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <p class="invite-copy">Send this link privately to <strong id="invite-link-member">your family member</strong>. It expires in 7 days and lets them choose their own PIN.</p>
+      <label>Private setup link<input id="invite-url" type="url" readonly></label>
+      <button id="copy-invite-link" class="button button-primary button-wide" type="button">Copy link <span>⧉</span></button>
+      <p class="form-hint">Anyone with this link can set up this profile. Share it only with the intended person.</p>
+    </div>
   </dialog>
   <script src="assets/app.js" defer></script>
 </body>

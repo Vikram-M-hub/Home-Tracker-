@@ -75,7 +75,7 @@ async function showLogin() {
     const selected=state.members.find(m=>m.id===state.selectedProfile);
     if(!selected.activated){
       $("#login-form").classList.add("hidden");
-      $("#login-pending").textContent=selected.invited?"A setup link was sent to your email. Open it to choose your own PIN.":"Your profile is ready. Ask the household organizer to send your secure setup email.";
+      $("#login-pending").textContent=selected.invited?"Your setup link is ready. Ask the organizer to share it with you.":"Your profile is ready. Ask the household organizer for a secure setup link.";
       $("#login-pending").classList.remove("hidden");
       $$(".profile-option").forEach(b=>b.classList.toggle("selected",b===button));
       return;
@@ -113,13 +113,20 @@ function renderMemberNotices(){
   const host=$("#member-notices");const pending=state.members.filter(m=>!m.activated);
   if(state.me.role!=="admin"||!pending.length){host.classList.add("hidden");host.innerHTML="";return;}
   host.classList.remove("hidden");
-  host.innerHTML=`<div class="member-notice-heading"><div><strong>PIN setup pending</strong><span>${pending.length} ${pending.length===1?"person needs":"people need"} to activate their profile</span></div></div><div class="pending-members">${pending.map(m=>`<div class="pending-member"><span class="avatar avatar-xs">${escapeHtml(initials(m.name))}</span><span>${escapeHtml(m.name)}</span><button class="send-invite" data-member="${escapeHtml(m.id)}" type="button">${m.invited?"Resend setup email":"Send setup email"}</button></div>`).join("")}</div>`;
+  host.innerHTML=`<div class="member-notice-heading"><div><strong>PIN setup pending</strong><span>${pending.length} ${pending.length===1?"person needs":"people need"} to activate their profile</span></div></div><div class="pending-members">${pending.map(m=>`<div class="pending-member"><span class="avatar avatar-xs">${escapeHtml(initials(m.name))}</span><span>${escapeHtml(m.name)}</span><button class="send-invite" data-member="${escapeHtml(m.id)}" type="button">${m.invited?"Get new setup link":"Get setup link"}</button></div>`).join("")}</div>`;
   $$(".send-invite",host).forEach(button=>button.addEventListener("click",async()=>{
     if(previewMode){showToast("Sample preview only");return;}
     button.disabled=true;
-    try{const result=await api(`/api/members/${button.dataset.member}/invite`,{method:"POST"});const index=state.members.findIndex(m=>m.id===result.member.id);state.members[index]=result.member;populateMembers();showToast(result.invitation_sent?"Setup email sent":"Email delivery is not configured yet");}
+    try{const result=await api(`/api/members/${button.dataset.member}/invite`,{method:"POST"});const index=state.members.findIndex(m=>m.id===result.member.id);state.members[index]=result.member;populateMembers();openInviteLink(result.invite_url,result.member.name,result.invitation_sent);}
     catch(error){showToast(error.message);}finally{button.disabled=false;}
   }));
+}
+async function openInviteLink(url,name,emailSent=false){
+  $("#invite-link-member").textContent=name;
+  $("#invite-url").value=url;
+  $("#invite-link-dialog").showModal();
+  try{await navigator.clipboard.writeText(url);showToast(emailSent?"Setup email sent · link copied":"Link copied · share it privately by WhatsApp or text");}
+  catch{const input=$("#invite-url");input.focus();input.select();showToast("Setup link ready · copy it and share privately");}
 }
 function dueLabel(task) {
   if (!task.due_date) return "No due date";
@@ -173,7 +180,7 @@ $("#setup-form").addEventListener("submit", async e => {
   e.preventDefault(); const form = e.currentTarget; const entries = $$(".profile-entry", form);
   const members = entries.map(entry => ({name:$("[name=member_name]",entry).value, email:$("[name=member_email]",entry).value}));
   const submit = $("[type=submit]",form); submit.disabled = true; submit.textContent = "Setting up your home…";
-  try { const data = await api("/api/setup", {method:"POST",body:JSON.stringify({household_name:$("[name=household_name]",form).value,members,organizer_pin:$("#organizer-pin").value})}); const me = await api("/api/me"); openDashboard(me); showToast(data.invites_pending?`Welcome! ${data.invites_pending} setup email(s) still need email configuration.`:`Welcome to ${data.household.name}!`); }
+  try { const data = await api("/api/setup", {method:"POST",body:JSON.stringify({household_name:$('[name=household_name]',form).value,members,organizer_pin:$("#organizer-pin").value})}); const me = await api("/api/me"); openDashboard(me); showToast(data.invites_pending?`Welcome! Get setup links for ${data.invites_pending} family member(s) on the Family board.`:`Welcome to ${data.household.name}!`); }
   catch(e) { showToast(e.message); submit.disabled = false; submit.innerHTML = 'Create our family space <span>→</span>'; }
 });
 $("#login-form").addEventListener("submit", async e => {
@@ -192,6 +199,9 @@ $("#task-dialog").addEventListener("click", e=>{if(e.target === $("#task-dialog"
 $("#manage-members").addEventListener("click",()=>$("#member-dialog").showModal());
 $("#close-member-dialog").addEventListener("click",()=>$("#member-dialog").close());
 $("#member-dialog").addEventListener("click",e=>{if(e.target===$("#member-dialog")) $("#member-dialog").close();});
+$("#close-invite-link").addEventListener("click",()=>$("#invite-link-dialog").close());
+$("#invite-link-dialog").addEventListener("click",e=>{if(e.target===$("#invite-link-dialog")) $("#invite-link-dialog").close();});
+$("#copy-invite-link").addEventListener("click",async()=>{const input=$("#invite-url");try{await navigator.clipboard.writeText(input.value);showToast("Link copied · share it privately");}catch{input.focus();input.select();document.execCommand("copy");showToast("Link copied · share it privately");}});
 $("#member-form").addEventListener("submit",async e=>{
   e.preventDefault(); const f=new FormData(e.currentTarget); const button=$("[type=submit]",e.currentTarget); button.disabled=true;
   try { const data=previewMode?{member:{id:crypto.randomUUID(),name:f.get("name"),email:f.get("email"),role:"member",activated:true}}:await api("/api/members",{method:"POST",body:JSON.stringify({name:f.get("name"),email:f.get("email")})}); state.members.push(data.member); populateMembers(); $("#member-dialog").close(); e.currentTarget.reset(); showToast(data.invitation_sent===false?"Member added · email delivery still needs setup":`${data.member.name} is in the family space`); }

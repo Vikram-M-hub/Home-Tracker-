@@ -13,11 +13,11 @@ pip install -r requirements.txt
 uvicorn app:app --reload
 ```
 
-Open http://127.0.0.1:8000 and create the household. The organizer chooses a PIN. Each additional family member gets an email invitation and sets their own PIN from that link. Local data is stored in `.data/family.json` and is excluded from Git.
+Open http://127.0.0.1:8000 and create the household. The organizer chooses a PIN. Each additional family member activates their profile through a private setup link shared by the organizer, then chooses their own PIN. Links expire after seven days. Local data is stored in `.data/family.json` and is excluded from Git.
 
 ## Features
 
-- Guided household setup, profiles, invitations, and per-person PINs.
+- Guided household setup, profiles, private copyable setup links, and per-person PINs.
 - Personal task list and shared family board, assignees, due dates, priorities, notes, and progress updates.
 - Responsive blue and white interface, saved dark mode, large mobile controls, and bottom navigation.
 - Optional email alerts for invitations, new assignments, and due-date reminders.
@@ -29,14 +29,14 @@ The app is prepared for a free Render web service and a free Neon Postgres datab
 1. Push this repository to GitHub and create a Neon Postgres project. Copy its pooled connection string (Neon's `DATABASE_URL`).
 2. In Render, create a Blueprint from this repository and select the free instance. Set `DATABASE_URL` from Neon.
 3. After Render gives you a public URL, set `PUBLIC_URL` to that URL and save. This is used in member setup links.
-4. For email, create a free Resend account, verify a sending domain/address, and set `RESEND_API_KEY` and `EMAIL_FROM` in Render. Without these, the app works but cannot send invites or notifications.
+4. Email is optional. Without a verified sender domain and Resend credentials, the organizer can copy each member’s setup link from the Family board and share it privately by WhatsApp or text. Links expire after seven days. Configure `RESEND_API_KEY` and `EMAIL_FROM` in Render to enable email delivery later.
 5. In GitHub repository Settings → Secrets and variables → Actions, add `PUBLIC_APP_URL` (the Render URL) and `REMINDER_JOB_TOKEN` (the same generated value shown in Render). The daily workflow sends due reminders at 9:00 a.m. India time; you can also run it manually from Actions.
 
 Render generates `SESSION_SECRET` and `REMINDER_JOB_TOKEN`; keep both private. `COOKIE_SECURE` is enabled for HTTPS. The database stores the single household as one JSON document and is suitable for this starter app. Do not set `FIRESTORE_COLLECTION` when using Neon.
 
 ## Email behavior
 
-Invitations contain a one-time link that expires after seven days. Members set their own 4–6 digit PIN, stored as a salted PBKDF2 hash. Assignment emails send immediately; the scheduled GitHub Actions workflow checks tasks due in three days, due today, and overdue weekly. Resend's free plan has daily sending limits. The email provider and verified sender are not included in this source repository and must be configured in your accounts.
+Setup links are one-time tokens that expire after seven days. Organizers can copy a link from the Family board and share it privately. Members set their own 4–6 digit PIN, stored as a salted PBKDF2 hash. If Resend and a verified sender are configured, invitations and assignment emails can also be delivered by email; otherwise the app works with copyable links and does not send email. The scheduled GitHub Actions workflow checks tasks due in three days, due today, and overdue weekly when its secrets are configured.
 
 ## API
 

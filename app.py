@@ -215,10 +215,7 @@ def setup(payload: SetupInput, request: Request, response: Response) -> dict[str
         members.append({"id": str(uuid4()), "name": item.name.strip(), "email": item.email.strip(), "pin": pin_hash(payload.organizer_pin) if index == 0 else None, "role": "admin" if index == 0 else "member", "created_at": now_iso()})
     data = {"household": household, "members": members, "tasks": []}
     base_url = os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/"))
-    invite_results = []
-    if len(members) > 1 and os.getenv("RESEND_API_KEY") and os.getenv("EMAIL_FROM"):
-        for item in members[1:]:
-            invite_results.append(issue_invitation(item, base_url))
+    invite_results = [issue_invitation(item, base_url)[0] for item in members[1:]]
     save_data(data)
     response.set_cookie("family_session", make_token(members[0]["id"], household["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
     return {"household": household, "member": public_member(members[0]), "invites_sent": sum(invite_results), "invites_pending": len(members) - 1 - sum(invite_results)}
@@ -241,7 +238,7 @@ def login(payload: LoginInput, response: Response) -> dict[str, Any]:
     data = load_data()
     member = next((m for m in data["members"] if m["id"] == payload.member_id), None)
     if member and not member.get("pin"):
-        raise HTTPException(status_code=403, detail="Open the secure setup link sent to your email to choose your PIN")
+        raise HTTPException(status_code=403, detail="Ask the household organizer for a setup link to choose your PIN")
     supplied = pin_hash(payload.pin, member["pin"]["salt"])["hash"] if member else "0" * 64
     expected = member["pin"]["hash"] if member else "f" * 64
     if not member or not hmac.compare_digest(supplied, expected):
@@ -280,9 +277,9 @@ def add_member(payload: MemberAdd, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="That email is already in this household")
     added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "role": "member", "created_at": now_iso()}
     data["members"].append(added)
-    invitation_sent = issue_invitation(added, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
+    invitation_sent, invite_url = issue_invitation(added, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
     save_data(data)
-    return {"member": public_member(added), "invitation_sent": invitation_sent}
+    return {"member": public_member(added), "invitation_sent": invitation_sent, "invite_url": invite_url}
 
 
 @app.post("/api/members/{member_id}/invite")
@@ -295,24 +292,20 @@ def resend_invitation(member_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Family member not found")
     if target.get("pin"):
         raise HTTPException(status_code=409, detail="This family member has already set up their PIN")
-    sent = issue_invitation(target, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
-    if sent:
-        save_data(data)
-    return {"invitation_sent": sent, "member": public_member(target)}
+    sent, invite_url = issue_invitation(target, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
+    save_data(data)
+    return {"invitation_sent": sent, "member": public_member(target), "invite_url": invite_url}
 
 
-def issue_invitation(member: dict[str, Any], base_url: str) -> bool:
-    if not os.getenv("RESEND_API_KEY") or not os.getenv("EMAIL_FROM"):
-        return False
+def issue_invitation(member: dict[str, Any], base_url: str) -> tuple[bool, str]:
     raw_token = secrets.token_urlsafe(32)
     member["invite_token_hash"] = hashlib.sha256(raw_token.encode()).hexdigest()
     member["invite_expires_at"] = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     invite_url = f"{base_url.rstrip('/')}/?invite={raw_token}"
-    sent = send_email(member["email"], "Set up your Together family profile", f"Hi {member['name']},\n\nYou have been invited to your family’s Together dashboard. Choose your own 4–6 digit PIN using this secure link (valid for 7 days):\n\n{invite_url}\n\nIf you weren’t expecting this, you can ignore this email.")
-    if not sent:
-        member.pop("invite_token_hash", None)
-        member.pop("invite_expires_at", None)
-    return sent
+    sent = False
+    if os.getenv("RESEND_API_KEY") and os.getenv("EMAIL_FROM"):
+        sent = send_email(member["email"], "Set up your Together family profile", f"Hi {member['name']},\n\nYou have been invited to your family’s Together dashboard. Choose your own 4–6 digit PIN using this secure link (valid for 7 days):\n\n{invite_url}\n\nIf you weren’t expecting this, you can ignore this email.")
+    return sent, invite_url
 
 
 def invited_member(token: str, data: dict[str, Any]) -> dict[str, Any] | None:
