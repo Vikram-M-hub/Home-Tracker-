@@ -46,6 +46,7 @@ async function start() {
       {id:"t4",title:"Book the plumber for Saturday",assignee_id:"raj",assignee:people[2],due_date:new Date(Date.now()+2*86400000).toISOString().slice(0,10),priority:"normal",note:"",status:"todo"},
       {id:"t5",title:"Water the balcony plants",assignee_id:"sam",assignee:people[0],due_date:new Date().toISOString().slice(0,10),priority:"low",note:"",status:"done"},
     ];
+    state.tasks.forEach(task=>{task.created_by="sam";task.creator={id:"sam",name:people[0].name};});
     openDashboard({member:people[0],members:people,household:{name:"The Sharma Home"}});
     return;
   }
@@ -143,7 +144,7 @@ function taskCard(task, family = false) {
   const nextStatus = {todo:"in_progress",in_progress:"done",done:"todo"}[task.status];
   const actionText = {todo:"Start task",in_progress:"Mark done",done:"Reopen task"}[task.status];
   const overdue = task.status !== "done" && task.due_date && new Date(`${task.due_date}T12:00:00`) < new Date(new Date().setHours(0,0,0,0));
-  return `<article class="task-card ${task.status === "done" ? "is-done" : ""}"><button class="task-check ${task.status === "done" ? "checked" : ""}" data-task="${escapeHtml(task.id)}" data-next="${nextStatus}" aria-label="${actionText}" title="${actionText}" type="button">${task.status === "done" ? "✓" : task.status === "in_progress" ? "◷" : ""}</button><div class="task-main"><div class="task-title-row"><h3>${escapeHtml(task.title)}</h3>${task.priority === "high" ? '<span class="priority-badge">Important</span>' : ""}</div>${task.note ? `<p class="task-note">${escapeHtml(task.note)}</p>` : ""}<div class="task-meta"><span class="due-pill ${overdue ? "overdue" : ""}"><span>◷</span>${dueLabel(task)}</span>${family ? `<span class="assignee"><span class="avatar avatar-xs">${escapeHtml(initials(task.assignee?.name || "?"))}</span>${escapeHtml(task.assignee?.name || "Unassigned")}</span>` : ""}</div></div><span class="status-pill status-${task.status}">${statusText}</span></article>`;
+  return `<article class="task-card ${task.status === "done" ? "is-done" : ""}"><button class="task-check ${task.status === "done" ? "checked" : ""}" data-task="${escapeHtml(task.id)}" data-next="${nextStatus}" aria-label="${actionText}" title="${actionText}" type="button">${task.status === "done" ? "✓" : task.status === "in_progress" ? "◷" : ""}</button><div class="task-main"><div class="task-title-row"><button class="task-title-button" data-task-detail="${escapeHtml(task.id)}" type="button"><h3>${escapeHtml(task.title)}</h3></button>${task.priority === "high" ? '<span class="priority-badge">Important</span>' : ""}</div>${task.note ? `<p class="task-note">${escapeHtml(task.note)}</p>` : ""}<div class="task-meta"><span class="due-pill ${overdue ? "overdue" : ""}"><span>◷</span>${dueLabel(task)}</span>${family ? `<span class="assignee"><span class="avatar avatar-xs">${escapeHtml(initials(task.assignee?.name || "?"))}</span>${escapeHtml(task.assignee?.name || "Unassigned")}</span>` : ""}<button class="task-details-trigger" data-task-detail="${escapeHtml(task.id)}" type="button">Details</button></div></div><span class="status-pill status-${task.status}">${statusText}</span></article>`;
 }
 function renderTasks() {
   const mine = state.tasks.filter(t => t.assignee_id === state.me.id);
@@ -163,6 +164,37 @@ function renderTasks() {
   $("#family-progress-number").textContent = `${state.tasks.length ? Math.round(allDone / state.tasks.length * 100) : 0}%`;
   $("#family-stats").innerHTML = [{key:"todo",label:"To do",icon:"○"},{key:"in_progress",label:"In progress",icon:"◷"},{key:"done",label:"Done",icon:"✓"}].map(s => `<div class="stat-card stat-${s.key}"><span class="stat-icon">${s.icon}</span><span class="stat-value">${state.tasks.filter(t => t.status === s.key).length}</span><span class="stat-label">${s.label}</span></div>`).join("");
   $$(".task-check").forEach(button => button.addEventListener("click", () => updateStatus(button.dataset.task, button.dataset.next)));
+  $$("[data-task-detail]").forEach(button => button.addEventListener("click", () => openTaskDetails(button.dataset.taskDetail)));
+}
+function showTaskDetailMode(editing){
+  $("#task-details-view").classList.toggle("hidden",editing);
+  $("#task-edit-form").classList.toggle("hidden",!editing);
+  $("#task-delete-button").classList.toggle("hidden",editing);
+  $("#task-detail-edit").classList.toggle("hidden",editing);
+  $("#task-detail-heading").textContent=editing?"Edit task":"Task details";
+}
+function openTaskDetails(taskId){
+  const task=state.tasks.find(item=>item.id===taskId);if(!task)return;
+  state.activeTaskId=taskId;
+  $("#detail-task-title").textContent=task.title;
+  $("#detail-task-assignee").textContent=task.assignee?.name||state.members.find(m=>m.id===task.assignee_id)?.name||"Unassigned";
+  $("#detail-task-due").textContent=task.due_date?new Intl.DateTimeFormat(undefined,{year:"numeric",month:"long",day:"numeric"}).format(new Date(`${task.due_date}T12:00:00`)):"No due date";
+  $("#detail-task-priority").textContent={low:"Whenever",normal:"Normal",high:"Important"}[task.priority]||"Normal";
+  $("#detail-task-status").textContent={todo:"To do",in_progress:"In progress",done:"Done"}[task.status]||task.status;
+  $("#detail-task-note").textContent=task.note||"No description added.";
+  $("#detail-task-creator").textContent=task.creator?.name||state.members.find(m=>m.id===task.created_by)?.name||"Unknown";
+  $("#detail-task-created").textContent=task.created_at?new Intl.DateTimeFormat(undefined,{year:"numeric",month:"long",day:"numeric"}).format(new Date(task.created_at)):"—";
+  const isCreator=task.created_by===state.me.id;
+  $("#task-owner-actions").classList.toggle("hidden",!isCreator);
+  $("#edit-task-title").value=task.title;
+  const editAssignee=task.status==="done"?(task.original_assignee_id||task.assignee_id):task.assignee_id;
+  $("#edit-task-assignee-label").textContent=task.status==="done"?"Assigned to when reopened":"Assigned to";
+  $("#edit-task-assignee").innerHTML=state.members.map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===editAssignee?"selected":""}>${escapeHtml(m.name)}</option>`).join("");
+  $("#edit-task-due").value=task.due_date||"";
+  $("#edit-task-note").value=task.note||"";
+  $$("#task-edit-form [name=priority]").forEach(input=>input.checked=input.value===task.priority);
+  showTaskDetailMode(false);
+  $("#task-detail-dialog").showModal();
 }
 async function updateStatus(id, status) {
   if (previewMode) {
@@ -196,11 +228,32 @@ $("#login-form").addEventListener("submit", async e => {
 $("#account-button").addEventListener("click", async () => { if(previewMode){showToast("You’re viewing a sample family space");return;} await api("/api/logout", {method:"POST"}); state.me = null; await showLogin(); });
 $("#task-form").addEventListener("submit", async e => {
   e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note")};
-  try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee});renderTasks();$("#task-dialog").close();form.reset();showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; await loadTasks(); showToast(result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
+  try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; await loadTasks(); showToast(result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
   catch(error) { showToast(error.message); }
 });
 $("#close-dialog").addEventListener("click",()=>$("#task-dialog").close());
 $("#task-dialog").addEventListener("click", e=>{if(e.target === $("#task-dialog")) $("#task-dialog").close();});
+$("#task-detail-edit").addEventListener("click",()=>showTaskDetailMode(true));
+$("#task-detail-cancel").addEventListener("click",()=>showTaskDetailMode(false));
+$("#close-task-detail").addEventListener("click",()=>$("#task-detail-dialog").close());
+$("#task-detail-dialog").addEventListener("click",e=>{if(e.target===$("#task-detail-dialog")) $("#task-detail-dialog").close();});
+$("#task-edit-form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const task=state.tasks.find(item=>item.id===state.activeTaskId);if(!task||task.created_by!==state.me.id){showToast("Only the task creator can edit this task");return;}
+  const f=new FormData(e.currentTarget);const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note")};
+  const button=$("[type=submit]",e.currentTarget);button.disabled=true;
+  try{
+    if(previewMode){const wasDone=task.status==="done",currentAssignee=task.assignee_id,completedBy=task.completed_by;Object.assign(task,payload,{original_assignee_id:payload.assignee_id});if(wasDone)task.assignee_id=completedBy||currentAssignee;task.assignee=state.members.find(m=>m.id===task.assignee_id);renderTasks();}
+    else{await api(`/api/tasks/${task.id}/details`,{method:"PATCH",body:JSON.stringify(payload)});await loadTasks();}
+    $("#task-detail-dialog").close();showToast("Task details updated");
+  }catch(error){showToast(error.message);}finally{button.disabled=false;}
+});
+$("#task-delete-button").addEventListener("click",async()=>{
+  const task=state.tasks.find(item=>item.id===state.activeTaskId);if(!task||task.created_by!==state.me.id){showToast("Only the task creator can delete this task");return;}
+  if(!window.confirm(`Delete “${task.title}”? This can’t be undone.`))return;
+  try{if(previewMode){state.tasks=state.tasks.filter(item=>item.id!==task.id);renderTasks();}else{await api(`/api/tasks/${task.id}`,{method:"DELETE"});await loadTasks();}$("#task-detail-dialog").close();showToast("Task deleted");}
+  catch(error){showToast(error.message);}
+});
 $("#manage-members").addEventListener("click",()=>$("#member-dialog").showModal());
 $("#close-member-dialog").addEventListener("click",()=>$("#member-dialog").close());
 $("#member-dialog").addEventListener("click",e=>{if(e.target===$("#member-dialog")) $("#member-dialog").close();});

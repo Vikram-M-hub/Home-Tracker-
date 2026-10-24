@@ -175,6 +175,14 @@ class TaskUpdate(BaseModel):
     status: str = Field(pattern=r"^(todo|in_progress|done)$")
 
 
+class TaskEdit(BaseModel):
+    title: str = Field(min_length=1, max_length=140)
+    assignee_id: str
+    due_date: date | None = None
+    priority: str = Field(default="normal", pattern=r"^(low|normal|high)$")
+    note: str = Field(default="", max_length=800)
+
+
 class MemberAdd(MemberInput):
     pass
 
@@ -343,8 +351,10 @@ def activate_invitation(payload: ActivationInput, response: Response) -> dict[st
 
 def public_task(task: dict[str, Any], members: list[dict[str, Any]]) -> dict[str, Any]:
     assigned = next((m for m in members if m["id"] == task["assignee_id"]), None)
+    creator = next((m for m in members if m["id"] == task.get("created_by")), None)
     task = {k: v for k, v in task.items() if k != "reminders_sent"}
     task["assignee"] = public_member(assigned) if assigned else None
+    task["creator"] = {"id": creator["id"], "name": creator["name"]} if creator else None
     return task
 
 
@@ -375,7 +385,7 @@ def create_task(payload: TaskInput, request: Request) -> dict[str, Any]:
 
 @app.patch("/api/tasks/{task_id}")
 def update_task(task_id: str, payload: TaskUpdate, request: Request) -> dict[str, Any]:
-    _, data = current_member(request)
+    member, data = current_member(request)
     task = next((t for t in data["tasks"] if t["id"] == task_id), None)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -391,6 +401,42 @@ def update_task(task_id: str, payload: TaskUpdate, request: Request) -> dict[str
     task["updated_at"] = now_iso()
     save_data(data)
     return {"task": public_task(task, data["members"])}
+
+
+@app.patch("/api/tasks/{task_id}/details")
+def edit_task(task_id: str, payload: TaskEdit, request: Request) -> dict[str, Any]:
+    member, data = current_member(request)
+    task = next((t for t in data["tasks"] if t["id"] == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.get("created_by") != member["id"]:
+        raise HTTPException(status_code=403, detail="Only the person who created this task can edit it")
+    assignee = next((m for m in data["members"] if m["id"] == payload.assignee_id), None)
+    if not assignee:
+        raise HTTPException(status_code=422, detail="Choose a member of this household")
+    task["title"] = payload.title.strip()
+    if task.get("status") != "done":
+        task["assignee_id"] = payload.assignee_id
+    task["original_assignee_id"] = payload.assignee_id
+    task["due_date"] = payload.due_date.isoformat() if payload.due_date else None
+    task["priority"] = payload.priority
+    task["note"] = payload.note.strip()
+    task["updated_at"] = now_iso()
+    save_data(data)
+    return {"task": public_task(task, data["members"])}
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    task = next((t for t in data["tasks"] if t["id"] == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.get("created_by") != member["id"]:
+        raise HTTPException(status_code=403, detail="Only the person who created this task can delete it")
+    data["tasks"].remove(task)
+    save_data(data)
+    return {"ok": True}
 
 
 def send_email(to: str, subject: str, body: str) -> bool:

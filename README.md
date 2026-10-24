@@ -19,6 +19,7 @@ Open http://127.0.0.1:8000 and create the household. The organizer chooses a PIN
 
 - Guided household setup, profiles, private copyable setup links, and per-person PINs.
 - Personal task list and shared family board, assignees, due dates, priorities, notes, and progress updates. When someone completes another member’s task, the completed task moves to that person; reopening it returns it to its original assignee.
+- Open a task in an in-page details dialog. The creator can edit its title, assignee, due date, priority, and description or delete it; the server enforces creator-only access.
 - Responsive blue and white interface, saved dark mode, large mobile controls, and bottom navigation.
 - Optional email alerts for invitations, new assignments, and due-date reminders.
 
@@ -43,7 +44,7 @@ Setup links are one-time tokens that expire after seven days. Organizers can cop
 - `POST /api/setup`, `POST /api/login`, `POST /api/logout`, `GET /api/me`
 - `GET /api/members/public`, `POST /api/members`, `POST /api/members/{id}/invite`
 - `GET /api/invitations/{token}`, `POST /api/invitations/activate`
-- `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/{task_id}`
+- `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/{task_id}` (status), `PATCH /api/tasks/{task_id}/details`, `DELETE /api/tasks/{task_id}`
 - `POST /api/jobs/reminders` (bearer token required), `GET /api/health`
 
 ## Visual preview
