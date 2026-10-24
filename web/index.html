@@ -29,7 +29,7 @@
           <label>Your organizer PIN<input id="organizer-pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" required placeholder="Choose 4–6 digits" autocomplete="new-password"></label>
           <button class="button button-primary button-wide" type="submit">Create our family space <span>→</span></button>
         </form>
-        <p class="form-hint">You set your own organizer PIN. Other family members get a secure email link to create their own PIN.</p>
+        <p class="form-hint">You set your own organizer PIN. Share each family member’s private setup link so they can choose a PIN of their own.</p>
       </div>
     </section>
 
@@ -124,7 +124,7 @@
       <div class="dialog-top"><div><div class="eyebrow">GROW YOUR FAMILY SPACE</div><h2>Add a family member</h2></div><button id="close-member-dialog" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
       <p class="invite-copy">We’ll create a private setup link to share by WhatsApp or text. They’ll choose their own PIN.</p>
       <label>Name<input name="name" required maxlength="60" placeholder="e.g. Asha"></label>
-      <label>Email<input name="email" type="email" required maxlength="254" placeholder="asha@example.com"></label>
+      <label>Email <span class="optional">Optional · for email alerts later</span><input name="email" type="email" maxlength="254" placeholder="asha@example.com"></label>
       <button class="button button-primary button-wide" type="submit">Add to our family <span>→</span></button>
     </form>
   </dialog>

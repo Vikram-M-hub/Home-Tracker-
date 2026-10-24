@@ -24,7 +24,7 @@ function profileCard(member) {
 function renderSetupProfiles() {
   const host = $("#setup-members");
   const index=host.children.length;
-  host.insertAdjacentHTML("beforeend", `<div class="profile-entry"><div class="profile-entry-head"><span class="entry-number">${index + 1}</span><strong>${index===0?"You · organizer":"Family member"}</strong>${index ? '<button class="remove-profile" type="button" aria-label="Remove member">×</button>' : ""}</div><label>Name<input name="member_name" required maxlength="60" placeholder="e.g. Sam"></label><label>Email<input name="member_email" type="email" required maxlength="254" placeholder="sam@example.com"></label></div>`);
+  host.insertAdjacentHTML("beforeend", `<div class="profile-entry"><div class="profile-entry-head"><span class="entry-number">${index + 1}</span><strong>${index===0?"You · organizer":"Family member"}</strong>${index ? '<button class="remove-profile" type="button" aria-label="Remove member">×</button>' : ""}</div><label>Name<input name="member_name" required maxlength="60" placeholder="e.g. Sam"></label><label>Email <span class="optional">Optional · for email alerts later</span><input name="member_email" type="email" maxlength="254" placeholder="sam@example.com"></label></div>`);
   const last = host.lastElementChild; $(".remove-profile", last)?.addEventListener("click", () => last.remove());
 }
 async function start() {
@@ -204,7 +204,7 @@ $("#invite-link-dialog").addEventListener("click",e=>{if(e.target===$("#invite-l
 $("#copy-invite-link").addEventListener("click",async()=>{const input=$("#invite-url");try{await navigator.clipboard.writeText(input.value);showToast("Link copied · share it privately");}catch{input.focus();input.select();document.execCommand("copy");showToast("Link copied · share it privately");}});
 $("#member-form").addEventListener("submit",async e=>{
   e.preventDefault(); const f=new FormData(e.currentTarget); const button=$("[type=submit]",e.currentTarget); button.disabled=true;
-  try { const data=previewMode?{member:{id:crypto.randomUUID(),name:f.get("name"),email:f.get("email"),role:"member",activated:true}}:await api("/api/members",{method:"POST",body:JSON.stringify({name:f.get("name"),email:f.get("email")})}); state.members.push(data.member); populateMembers(); $("#member-dialog").close(); e.currentTarget.reset(); showToast(data.invitation_sent===false?"Member added · email delivery still needs setup":`${data.member.name} is in the family space`); }
+  try { const data=previewMode?{member:{id:crypto.randomUUID(),name:f.get("name"),email:f.get("email"),role:"member",activated:true}}:await api("/api/members",{method:"POST",body:JSON.stringify({name:f.get("name"),email:f.get("email")})}); state.members.push(data.member); populateMembers(); $("#member-dialog").close(); e.currentTarget.reset(); showToast(`${data.member.name} added · get their setup link on the Family board`); }
   catch(error){showToast(error.message);} finally{button.disabled=false;}
 });
 ["#add-task-top","#mobile-add","#empty-add","#family-empty-add"].forEach(id=>$(id).addEventListener("click",openTaskDialog));

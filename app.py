@@ -149,7 +149,7 @@ def current_member(request: Request, data: dict[str, Any] | None = None) -> tupl
 
 class MemberInput(BaseModel):
     name: str = Field(min_length=1, max_length=60)
-    email: str = Field(min_length=3, max_length=254)
+    email: str = Field(default="", max_length=254)
 
 
 class SetupInput(BaseModel):
@@ -273,7 +273,7 @@ def add_member(payload: MemberAdd, request: Request) -> dict[str, Any]:
     member, data = current_member(request)
     if member["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only the household organizer can add members")
-    if any(m["email"].lower() == payload.email.lower() for m in data["members"]):
+    if payload.email and any(m["email"].lower() == payload.email.lower() for m in data["members"]):
         raise HTTPException(status_code=409, detail="That email is already in this household")
     added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "role": "member", "created_at": now_iso()}
     data["members"].append(added)
@@ -303,7 +303,7 @@ def issue_invitation(member: dict[str, Any], base_url: str) -> tuple[bool, str]:
     member["invite_expires_at"] = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     invite_url = f"{base_url.rstrip('/')}/?invite={raw_token}"
     sent = False
-    if os.getenv("RESEND_API_KEY") and os.getenv("EMAIL_FROM"):
+    if member.get("email") and os.getenv("RESEND_API_KEY") and os.getenv("EMAIL_FROM"):
         sent = send_email(member["email"], "Set up your Together family profile", f"Hi {member['name']},\n\nYou have been invited to your family’s Together dashboard. Choose your own 4–6 digit PIN using this secure link (valid for 7 days):\n\n{invite_url}\n\nIf you weren’t expecting this, you can ignore this email.")
     return sent, invite_url
 
@@ -388,7 +388,7 @@ def update_task(task_id: str, payload: TaskUpdate, request: Request) -> dict[str
 def send_email(to: str, subject: str, body: str) -> bool:
     api_key = os.getenv("RESEND_API_KEY")
     sender = os.getenv("EMAIL_FROM")
-    if not api_key or not sender:
+    if not to or not api_key or not sender:
         return False
     payload = json.dumps({"from": sender, "to": [to], "subject": subject, "text": body}).encode()
     request = urllib.request.Request("https://api.resend.com/emails", data=payload, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
