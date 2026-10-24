@@ -1,0 +1,16 @@
+name: Daily task email reminders
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask the app to send due reminders
+        env:
+          APP_URL: ${{ secrets.PUBLIC_APP_URL }}
+          JOB_TOKEN: ${{ secrets.REMINDER_JOB_TOKEN }}
+        run: curl --fail --silent --show-error -X POST "$APP_URL/api/jobs/reminders" -H "Authorization: Bearer $JOB_TOKEN"

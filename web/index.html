@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f7fb">
+  <title>Together — Home, in sync</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <main id="app" class="app-shell">
+    <section id="loading" class="loading-screen"><span class="brand-mark">t</span><p>Getting your home in sync…</p></section>
+
+    <section id="setup-screen" class="setup-screen hidden">
+      <div class="setup-brand"><span class="brand-mark">t</span><span>Together</span></div>
+      <div class="setup-card">
+        <div class="eyebrow">A LITTLE MORE IN SYNC</div>
+        <h1>Make home<br><span>work together.</span></h1>
+        <p class="setup-copy">One simple place for the things your family needs to get done.</p>
+        <form id="setup-form">
+          <label>Family or household name<input name="household_name" required maxlength="80" placeholder="The Sharma home"></label>
+          <div class="form-section-label">Set up your family members</div>
+          <div id="setup-members" class="setup-members"></div>
+          <button id="add-profile" class="text-button" type="button">＋ Add another person</button>
+          <label>Your organizer PIN<input id="organizer-pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" required placeholder="Choose 4–6 digits" autocomplete="new-password"></label>
+          <button class="button button-primary button-wide" type="submit">Create our family space <span>→</span></button>
+        </form>
+        <p class="form-hint">You set your own organizer PIN. Other family members get a secure email link to create their own PIN.</p>
+      </div>
+    </section>
+
+    <section id="login-screen" class="login-screen hidden">
+      <div class="setup-brand"><span class="brand-mark">t</span><span>Together</span></div>
+      <div class="login-card">
+        <div class="eyebrow">WELCOME BACK</div>
+        <h1>Who’s home?</h1>
+        <p>Choose your name and enter your PIN to see what’s on.</p>
+        <div id="profile-list" class="profile-list"></div>
+        <p id="login-pending" class="pending-hint hidden" aria-live="polite"></p>
+        <form id="login-form" class="hidden">
+          <input type="hidden" name="member_id">
+          <label id="pin-label" for="login-pin">Your PIN</label>
+          <input id="login-pin" name="pin" inputmode="numeric" autocomplete="current-password" pattern="[0-9]{4,6}" minlength="4" maxlength="6" required placeholder="••••" aria-describedby="login-error">
+          <p id="login-error" class="field-error" aria-live="polite"></p>
+          <button class="button button-primary button-wide" type="submit">Open my tasks <span>→</span></button>
+        </form>
+      </div>
+    </section>
+
+    <section id="pin-setup-screen" class="setup-screen hidden">
+      <div class="setup-brand"><span class="brand-mark">t</span><span>Together</span></div>
+      <div class="login-card activation-card">
+        <div class="eyebrow">YOUR FAMILY SPACE IS READY</div>
+        <h1>Choose your PIN</h1>
+        <p>Hi <strong id="invite-member-name">there</strong> — create a PIN that you’ll use when signing in.</p>
+        <form id="activation-form">
+          <input id="invite-token" type="hidden">
+          <label for="new-pin">Create a 4–6 digit PIN</label>
+          <input id="new-pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" required autocomplete="new-password" placeholder="Choose your PIN">
+          <label for="confirm-pin">Confirm your PIN</label>
+          <input id="confirm-pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" required autocomplete="new-password" placeholder="Enter it again">
+          <p id="activation-error" class="field-error" aria-live="polite"></p>
+          <button class="button button-primary button-wide" type="submit">Save my PIN <span>→</span></button>
+        </form>
+      </div>
+    </section>
+
+    <section id="dashboard" class="dashboard hidden">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Together home"><span class="brand-mark">t</span><span>Together<span class="brand-period">.</span></span></a>
+        <div class="topbar-actions">
+          <span id="preview-badge" class="preview-badge hidden">SAMPLE PREVIEW</span>
+          <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span id="theme-icon">☾</span></button>
+          <button id="account-button" class="account-button" type="button"><span id="account-avatar" class="avatar">S</span><span class="account-name" id="account-name">Sam</span><span class="chevron">⌄</span></button>
+        </div>
+      </header>
+      <div class="page-wrap">
+        <section class="welcome-row">
+          <div><div class="eyebrow" id="today-label">YOUR FAMILY SPACE</div><h1 id="welcome-title">Good morning, Sam</h1><p id="welcome-copy">Here’s what’s happening at home today.</p></div>
+          <button id="add-task-top" class="button button-primary add-desktop" type="button"><span class="plus">＋</span> Add a task</button>
+        </section>
+        <nav class="view-tabs" aria-label="Task view">
+          <button class="view-tab active" data-view="mine" type="button"><span class="tab-icon">◷</span> My tasks <span class="tab-count" id="my-count">0</span></button>
+          <button class="view-tab" data-view="family" type="button"><span class="tab-icon">⌂</span> Family board</button>
+        </nav>
+        <section id="my-home" class="my-home">
+          <div class="hero-card">
+            <div class="hero-copy"><span class="hero-kicker">YOUR DAY, AT A GLANCE</span><h2 id="hero-title">A fresh start.</h2><p id="hero-copy">Small things add up. You’ve got this.</p><div class="hero-progress-label"><span id="hero-progress-text">0 of 0 tasks done</span><strong id="hero-percent">0%</strong></div><div class="hero-progress"><span id="hero-progress"></span></div></div>
+            <div class="hero-art" aria-hidden="true"><div class="art-sun"></div><div class="art-home"><div class="art-roof"></div><div class="art-house"><span></span><i></i></div></div><div class="art-check">✓</div></div>
+          </div>
+          <div class="section-heading"><div><h2>Your tasks</h2><p id="task-summary">Things assigned to you</p></div><button id="my-filter" class="filter-button" type="button">All <span>⌄</span></button></div>
+          <div class="task-list" id="my-task-list"></div>
+          <div id="my-empty" class="empty-state hidden"><div class="empty-illustration"><span>✓</span></div><h3>All clear for now</h3><p>You don’t have any tasks here. Enjoy the breathing room.</p><button class="button button-secondary" id="empty-add" type="button">Add a task</button></div>
+        </section>
+        <section id="family-home" class="family-home hidden">
+          <div class="family-summary"><div><h2 id="family-title">The family board</h2><p>Everyone’s tasks, all in one place.</p></div><div class="family-total"><strong id="family-progress-number">0%</strong><span>tasks complete</span></div></div>
+          <div class="family-stats" id="family-stats"></div>
+          <div id="member-notices" class="member-notices hidden"></div>
+          <div class="board-toolbar"><div class="board-filters" role="group" aria-label="Filter tasks"><button class="filter-chip selected" data-filter="all" type="button">All tasks</button><button class="filter-chip" data-filter="todo" type="button">To do</button><button class="filter-chip" data-filter="in_progress" type="button">In progress</button><button class="filter-chip" data-filter="done" type="button">Done</button></div><div class="board-tools"><label class="member-filter"><span class="sr-only">Filter by family member</span><select id="member-filter"><option value="all">Everyone</option></select></label><button id="manage-members" class="small-action hidden" type="button">＋ Family member</button></div></div>
+          <div class="task-list family-list" id="family-task-list"></div>
+          <div id="family-empty" class="empty-state hidden"><div class="empty-illustration"><span>＋</span></div><h3>A clean slate</h3><p>Add the first task and get the family moving.</p><button class="button button-primary" id="family-empty-add" type="button">Add a task</button></div>
+        </section>
+      </div>
+      <nav class="mobile-nav" aria-label="Main navigation"><button class="mobile-nav-item active" data-view="mine" type="button"><span>◷</span><small>My tasks</small></button><button class="mobile-add" id="mobile-add" type="button" aria-label="Add a task">＋</button><button class="mobile-nav-item" data-view="family" type="button"><span>⌂</span><small>Family</small></button></nav>
+    </section>
+  </main>
+
+  <dialog id="task-dialog" class="task-dialog">
+    <form id="task-form" class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">MAKE IT HAPPEN</div><h2>Add a task</h2></div><button id="close-dialog" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <label>What needs to get done?<input name="title" required maxlength="140" placeholder="Pick up the documents from the bank" autocomplete="off"></label>
+      <div class="two-fields"><label>Who’s doing it?<select name="assignee_id" id="assignee-select" required></select></label><label>Due date<input name="due_date" type="date"></label></div>
+      <fieldset class="priority-field"><legend>How urgent is it?</legend><div class="priority-options"><label><input type="radio" name="priority" value="low"><span>Whenever</span></label><label><input type="radio" name="priority" value="normal" checked><span>Normal</span></label><label><input type="radio" name="priority" value="high"><span>Important</span></label></div></fieldset>
+      <label>Anything to add? <span class="optional">Optional</span><textarea name="note" rows="2" maxlength="800" placeholder="A little more detail can help"></textarea></label>
+      <button class="button button-primary button-wide" type="submit">Add to the list <span>→</span></button>
+    </form>
+  </dialog>
+  <dialog id="member-dialog" class="task-dialog member-dialog">
+    <form id="member-form" class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">GROW YOUR FAMILY SPACE</div><h2>Add a family member</h2></div><button id="close-member-dialog" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <p class="invite-copy">We’ll email them a private link so they can choose their own PIN.</p>
+      <label>Name<input name="name" required maxlength="60" placeholder="e.g. Asha"></label>
+      <label>Email<input name="email" type="email" required maxlength="254" placeholder="asha@example.com"></label>
+      <button class="button button-primary button-wide" type="submit">Add to our family <span>→</span></button>
+    </form>
+  </dialog>
+  <script src="assets/app.js" defer></script>
+</body>
+</html>
