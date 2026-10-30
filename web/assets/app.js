@@ -51,7 +51,10 @@ async function start() {
     return;
   }
   try { const data = await api("/api/me"); openDashboard(data); }
-  catch { showScreen("home-screen"); }
+  catch {
+    try { const home = await api("/api/homes/current/profiles"); await renderHomeProfiles(home); }
+    catch { showScreen("home-screen"); }
+  }
 }
 async function renderHomeProfiles(data) {
   $("#home-profiles-wrap").classList.remove("hidden"); $("#home-login-form").classList.add("hidden"); $("#toggle-create-home").classList.add("hidden"); $("#create-home-form").classList.add("hidden");
@@ -152,7 +155,7 @@ function populateMembers() {
   $("#assignee-select").innerHTML = state.members.map(m => `<option value="${escapeHtml(m.id)}" ${m.id === state.me.id ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
   $("#member-filter").innerHTML = `<option value="all">Everyone</option>` + state.members.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join("");
   $("#manage-members").classList.toggle("hidden", state.me.role !== "admin");
-  $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin");
+  $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   renderMemberNotices();
 }
 function renderMemberNotices(){
