@@ -1,6 +1,6 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-const state = {me: null, members: [], tasks: [], view: "mine", myFilter: "all", familyFilter: "all", memberFilter: "all", selectedProfile: null};
+const state = {me: null, members: [], tasks: [], view: "mine", myFilter: "all", mySearch: "", familyFilter: "all", memberFilter: "all", familySearch: "", selectedProfile: null};
 const previewMode = new URLSearchParams(location.search).has("preview");
 const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const initials = (name) => name.split(/\s+/).slice(0, 2).map(x => x[0]).join("").toUpperCase();
@@ -138,6 +138,7 @@ async function showLogin() {
 }
 function openDashboard(data) {
   state.me = data.member; state.members = data.members || [];
+  state.mySearch = ""; state.familySearch = ""; $("#my-task-search").value = ""; $("#family-task-search").value = "";
   $("#preview-badge").classList.toggle("hidden", !previewMode);
   if (data.household) $("#family-title").textContent = `${data.household.name}’s family board`;
   $("#account-name").textContent = state.me.name.split(" ")[0]; $("#account-avatar").textContent = initials(state.me.name);
@@ -194,6 +195,11 @@ function taskCard(task, family = false) {
   const overdue = task.status !== "done" && task.due_date && new Date(`${task.due_date}T12:00:00`) < new Date(new Date().setHours(0,0,0,0));
   return `<article class="task-card ${task.status === "done" ? "is-done" : ""}"><button class="task-check ${task.status === "done" ? "checked" : ""}" data-task="${escapeHtml(task.id)}" data-next="${nextStatus}" aria-label="${actionText}" title="${actionText}" type="button">${task.status === "done" ? "✓" : task.status === "in_progress" ? "◷" : ""}</button><div class="task-main"><div class="task-title-row"><button class="task-title-button" data-task-detail="${escapeHtml(task.id)}" type="button"><h3>${escapeHtml(task.title)}</h3></button>${task.priority === "high" ? '<span class="priority-badge">Important</span>' : ""}</div>${task.note ? `<p class="task-note">${escapeHtml(task.note)}</p>` : ""}<div class="task-meta"><span class="due-pill ${overdue ? "overdue" : ""}"><span>◷</span>${dueLabel(task)}</span>${family ? `<span class="assignee"><span class="avatar avatar-xs">${escapeHtml(initials(task.assignee?.name || "?"))}</span>${escapeHtml(task.assignee?.name || "Unassigned")}</span>` : ""}<button class="task-details-trigger" data-task-detail="${escapeHtml(task.id)}" type="button">Details</button></div></div><span class="status-pill status-${task.status}">${statusText}</span></article>`;
 }
+function matchesTaskSearch(task, query) {
+  if (!query) return true;
+  const assignee = task.assignee?.name || state.members.find(member => member.id === task.assignee_id)?.name || "";
+  return [task.title, task.note, assignee].some(value => String(value || "").toLocaleLowerCase().includes(query));
+}
 function renderTasks() {
   const mine = state.tasks.filter(t => t.assignee_id === state.me.id);
   const done = mine.filter(t => t.status === "done").length;
@@ -204,10 +210,16 @@ function renderTasks() {
   $("#hero-progress-text").textContent = `${done} of ${mine.length} ${mine.length === 1 ? "task" : "tasks"} done`;
   $("#hero-title").textContent = mine.length && done === mine.length ? "You did it!" : open === 0 ? "A fresh start." : open === 1 ? "One thing at a time." : "You’ve got this.";
   $("#hero-copy").textContent = mine.length && done === mine.length ? "Everything on your list is taken care of." : open ? `${open} ${open === 1 ? "task is" : "tasks are"} waiting for you.` : "Small things add up. You’ve got this.";
-  const myTasks = mine.filter(t => state.myFilter === "all" || (state.myFilter === "active" ? t.status !== "done" : t.status === state.myFilter));
-  $("#my-task-list").innerHTML = myTasks.map(t => taskCard(t)).join(""); $("#my-empty").classList.toggle("hidden", myTasks.length !== 0);
-  const filtered = state.tasks.filter(t => (state.familyFilter === "all" || t.status === state.familyFilter) && (state.memberFilter === "all" || t.assignee_id === state.memberFilter));
-  $("#family-task-list").innerHTML = filtered.map(t => taskCard(t, true)).join(""); $("#family-empty").classList.toggle("hidden", filtered.length !== 0);
+  const myTasks = mine.filter(t => (state.myFilter === "all" || (state.myFilter === "active" ? t.status !== "done" : t.status === state.myFilter)) && matchesTaskSearch(t, state.mySearch));
+  $("#my-task-list").innerHTML = myTasks.map(t => taskCard(t)).join("");
+  const myNoResults = Boolean(state.mySearch) && myTasks.length === 0;
+  $("#my-empty").classList.toggle("hidden", myTasks.length !== 0 || myNoResults);
+  $("#my-no-results").classList.toggle("hidden", !myNoResults);
+  const filtered = state.tasks.filter(t => (state.familyFilter === "all" || t.status === state.familyFilter) && (state.memberFilter === "all" || t.assignee_id === state.memberFilter) && matchesTaskSearch(t, state.familySearch));
+  $("#family-task-list").innerHTML = filtered.map(t => taskCard(t, true)).join("");
+  const familyNoResults = Boolean(state.familySearch) && filtered.length === 0;
+  $("#family-empty").classList.toggle("hidden", filtered.length !== 0 || familyNoResults);
+  $("#family-no-results").classList.toggle("hidden", !familyNoResults);
   const allDone = state.tasks.filter(t => t.status === "done").length;
   $("#family-progress-number").textContent = `${state.tasks.length ? Math.round(allDone / state.tasks.length * 100) : 0}%`;
   $("#family-stats").innerHTML = [{key:"todo",label:"To do",icon:"○"},{key:"in_progress",label:"In progress",icon:"◷"},{key:"done",label:"Done",icon:"✓"}].map(s => `<div class="stat-card stat-${s.key}"><span class="stat-icon">${s.icon}</span><span class="stat-value">${state.tasks.filter(t => t.status === s.key).length}</span><span class="stat-label">${s.label}</span></div>`).join("");
@@ -330,6 +342,10 @@ $("#member-form").addEventListener("submit",async e=>{
 $$('[data-view]').forEach(button=>button.addEventListener("click",()=>setView(button.dataset.view)));
 $$('[data-filter]').forEach(button=>button.addEventListener("click",()=>{state.familyFilter=button.dataset.filter; $$('.filter-chip').forEach(b=>b.classList.toggle("selected",b===button)); renderTasks();}));
 $("#member-filter").addEventListener("change",e=>{state.memberFilter=e.target.value;renderTasks();});
+$("#my-task-search").addEventListener("input",e=>{state.mySearch=e.target.value.trim().toLocaleLowerCase();renderTasks();});
+$("#family-task-search").addEventListener("input",e=>{state.familySearch=e.target.value.trim().toLocaleLowerCase();renderTasks();});
+$("#clear-my-search").addEventListener("click",()=>{$("#my-task-search").value="";state.mySearch="";renderTasks();$("#my-task-search").focus();});
+$("#clear-family-search").addEventListener("click",()=>{$("#family-task-search").value="";state.familySearch="";renderTasks();$("#family-task-search").focus();});
 $("#my-filter").addEventListener("click",()=>{state.myFilter=state.myFilter==="active"?"all":"active";$("#my-filter").innerHTML=`${state.myFilter==="active"?"Active":"All"} <span>⌄</span>`;renderTasks();});
 const savedTheme=localStorage.getItem("together-theme"); if(savedTheme) document.documentElement.dataset.theme=savedTheme;
 function updateThemeIcon(){ $("#theme-icon").textContent=document.documentElement.dataset.theme==="dark"?"☀":"☾"; }

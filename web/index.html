@@ -124,17 +124,21 @@
             <div class="hero-copy"><span class="hero-kicker">YOUR DAY, AT A GLANCE</span><h2 id="hero-title">A fresh start.</h2><p id="hero-copy">Small things add up. You’ve got this.</p><div class="hero-progress-label"><span id="hero-progress-text">0 of 0 tasks done</span><strong id="hero-percent">0%</strong></div><div class="hero-progress"><span id="hero-progress"></span></div></div>
             <div class="hero-art" aria-hidden="true"><div class="art-sun"></div><div class="art-home"><div class="art-roof"></div><div class="art-house"><span></span><i></i></div></div><div class="art-check">✓</div></div>
           </div>
+          <label class="task-search"><span aria-hidden="true">⌕</span><input id="my-task-search" type="search" placeholder="Search your tasks" aria-label="Search your tasks"></label>
           <div class="section-heading"><div><h2>Your tasks</h2><p id="task-summary">Things assigned to you</p></div><button id="my-filter" class="filter-button" type="button">All <span>⌄</span></button></div>
           <div class="task-list" id="my-task-list"></div>
           <div id="my-empty" class="empty-state hidden"><div class="empty-illustration"><span>✓</span></div><h3>All clear for now</h3><p>You don’t have any tasks here. Enjoy the breathing room.</p><button class="button button-secondary" id="empty-add" type="button">Add a task</button></div>
+          <div id="my-no-results" class="empty-state hidden"><h3>No matching tasks</h3><p>Try a different word or clear your search.</p><button class="button button-secondary" id="clear-my-search" type="button">Clear search</button></div>
         </section>
         <section id="family-home" class="family-home hidden">
           <div class="family-summary"><div><h2 id="family-title">The family board</h2><p>Everyone’s tasks, all in one place.</p></div><div class="family-total"><strong id="family-progress-number">0%</strong><span>tasks complete</span></div></div>
           <div class="family-stats" id="family-stats"></div>
           <div id="member-notices" class="member-notices hidden"></div>
+          <label class="task-search family-task-search"><span aria-hidden="true">⌕</span><input id="family-task-search" type="search" placeholder="Search family tasks" aria-label="Search family tasks"></label>
           <div class="board-toolbar"><div class="board-filters" role="group" aria-label="Filter tasks"><button class="filter-chip selected" data-filter="all" type="button">All tasks</button><button class="filter-chip" data-filter="todo" type="button">To do</button><button class="filter-chip" data-filter="in_progress" type="button">In progress</button><button class="filter-chip" data-filter="done" type="button">Done</button></div><div class="board-tools"><label class="member-filter"><span class="sr-only">Filter by family member</span><select id="member-filter"><option value="all">Everyone</option></select></label><button id="manage-members" class="small-action hidden" type="button">＋ Family member</button></div></div>
           <div class="task-list family-list" id="family-task-list"></div>
           <div id="family-empty" class="empty-state hidden"><div class="empty-illustration"><span>＋</span></div><h3>A clean slate</h3><p>Add the first task and get the family moving.</p><button class="button button-primary" id="family-empty-add" type="button">Add a task</button></div>
+          <div id="family-no-results" class="empty-state hidden"><h3>No matching tasks</h3><p>Try a different word or clear your search.</p><button class="button button-secondary" id="clear-family-search" type="button">Clear search</button></div>
         </section>
       </div>
       <nav class="mobile-nav" aria-label="Main navigation"><button class="mobile-nav-item active" data-view="mine" type="button"><span>◷</span><small>My tasks</small></button><button class="mobile-add" id="mobile-add" type="button" aria-label="Add a task">＋</button><button class="mobile-nav-item" data-view="family" type="button"><span>⌂</span><small>Family</small></button></nav>
