@@ -38,8 +38,10 @@ def now_iso() -> str:
 
 def _read_local() -> dict[str, Any]:
     if not DATA_FILE.exists():
-        return {"household": None, "members": [], "tasks": []}
-    return json.loads(DATA_FILE.read_text(encoding="utf-8"))
+        return {"household": None, "members": [], "tasks": [], "homes": {}}
+    data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+    data.setdefault("homes", {})
+    return data
 
 
 def _write_local(data: dict[str, Any]) -> None:
@@ -60,7 +62,9 @@ def load_data() -> dict[str, Any]:
             from google.cloud import firestore
 
             snap = firestore.Client().collection(collection).document("primary").get()
-            return snap.to_dict() or {"household": None, "members": [], "tasks": []}
+            data = snap.to_dict() or {"household": None, "members": [], "tasks": []}
+            data.setdefault("homes", {})
+            return data
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Household data is temporarily unavailable") from exc
     if _database_url():
@@ -73,7 +77,7 @@ def load_data() -> dict[str, Any]:
                 row = connection.execute("SELECT payload FROM family_state WHERE id = 1").fetchone()
                 if row:
                     return row[0]
-                empty = {"household": None, "members": [], "tasks": []}
+                empty = {"household": None, "members": [], "tasks": [], "homes": {}}
                 connection.execute("INSERT INTO family_state (id, payload) VALUES (1, %s) ON CONFLICT (id) DO NOTHING", (Jsonb(empty),))
                 return empty
         except Exception as exc:
@@ -82,7 +86,52 @@ def load_data() -> dict[str, Any]:
         return _read_local()
 
 
+def home_data(home_id: str | None = None) -> dict[str, Any]:
+    """Read one home while retaining the original single-home record for compatibility."""
+    root = load_data()
+    if home_id and root.get("household", {}).get("id") == home_id:
+        return {k: root[k] for k in ("household", "members", "tasks") if k in root}
+    if home_id and home_id in root.get("homes", {}):
+        return root["homes"][home_id]
+    return {k: root.get(k) for k in ("household", "members", "tasks")}
+
+
+def save_home(data: dict[str, Any]) -> None:
+    root = load_data()
+    household = data.get("household") or {}
+    home_id = household.get("id")
+    if not home_id:
+        raise HTTPException(status_code=400, detail="Home information is missing")
+    if root.get("household", {}).get("id") == home_id or not root.get("household"):
+        root.update(data)
+        root.setdefault("homes", {})
+    else:
+        root.setdefault("homes", {})[home_id] = data
+    save_data(root)
+
+
+def all_homes() -> list[dict[str, Any]]:
+    root = load_data()
+    homes = list(root.get("homes", {}).values())
+    if root.get("household"):
+        homes.append({k: root[k] for k in ("household", "members", "tasks") if k in root})
+    return homes
+
+
 def save_data(data: dict[str, Any]) -> None:
+    # Existing endpoints save a home document directly. Merge that document
+    # into the shared record so one household can never overwrite another.
+    if "homes" not in data:
+        root = load_data()
+        root.setdefault("homes", {})
+        home_id = (data.get("household") or {}).get("id")
+        if home_id and (root.get("household", {}).get("id") == home_id or not root.get("household")):
+            root.update(data)
+        elif home_id:
+            root["homes"][home_id] = data
+        else:
+            root.update(data)
+        data = root
     collection = os.getenv("FIRESTORE_COLLECTION")
     if collection:
         try:
@@ -138,7 +187,7 @@ def read_token(token: str) -> dict[str, str] | None:
 
 def current_member(request: Request, data: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     token = read_token(request.cookies.get("family_session", ""))
-    data = data or load_data()
+    data = data or (home_data(token.get("h")) if token else load_data())
     if not token or not data.get("household") or token.get("h") != data["household"]["id"]:
         raise HTTPException(status_code=401, detail="Please choose your profile and enter your PIN")
     member = next((m for m in data["members"] if m["id"] == token.get("m")), None)
@@ -156,6 +205,24 @@ class SetupInput(BaseModel):
     household_name: str = Field(min_length=1, max_length=80)
     members: list[MemberInput] = Field(min_length=1, max_length=20)
     organizer_pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class HomeCreateInput(BaseModel):
+    household_name: str = Field(min_length=1, max_length=80)
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9._-]+$")
+    pin: str = Field(pattern=r"^\d{4,6}$")
+    organizer_name: str = Field(min_length=1, max_length=60)
+    organizer_pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class HomeLoginInput(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class PinChangeInput(BaseModel):
+    current_pin: str = Field(pattern=r"^\d{4,6}$")
+    new_pin: str = Field(pattern=r"^\d{4,6}$")
 
 
 class LoginInput(BaseModel):
@@ -209,7 +276,63 @@ def health() -> dict[str, str]:
 
 @app.get("/api/setup/status")
 def setup_status() -> dict[str, bool]:
+    # The legacy mobile client uses this endpoint to decide whether its original
+    # household has been configured. New web households use the homes API below.
     return {"configured": load_data().get("household") is not None}
+
+
+@app.post("/api/homes")
+def create_home(payload: HomeCreateInput, request: Request, response: Response) -> dict[str, Any]:
+    username = payload.username.strip().lower()
+    if any((h.get("household") or {}).get("username", "").lower() == username for h in all_homes()):
+        raise HTTPException(status_code=409, detail="That home username is already taken. Choose another one.")
+    household = {"id": str(uuid4()), "name": payload.household_name.strip(), "username": username, "username_pin": pin_hash(payload.pin), "timezone": TZ_NAME, "created_at": now_iso()}
+    organizer = {"id": str(uuid4()), "name": payload.organizer_name.strip(), "email": "", "pin": pin_hash(payload.organizer_pin), "role": "admin", "created_at": now_iso()}
+    data = {"household": household, "members": [organizer], "tasks": []}
+    save_home(data)
+    response.set_cookie("family_home", make_token("", household["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return {"household": {k: v for k, v in household.items() if k != "username_pin"}, "member": public_member(organizer), "members": [public_member(organizer)]}
+
+
+@app.post("/api/homes/login")
+def login_home(payload: HomeLoginInput, response: Response) -> dict[str, Any]:
+    import time
+    username = payload.username.strip().lower()
+    bucket = f"home:{username}"
+    now = time.time()
+    attempts = [stamp for stamp in login_attempts.get(bucket, []) if now - stamp < 900]
+    if len(attempts) >= 10:
+        raise HTTPException(status_code=429, detail="Too many tries. Please wait 15 minutes and try again.")
+    data = next((h for h in all_homes() if (h.get("household") or {}).get("username", "").lower() == username), None)
+    credentials = (data or {}).get("household", {}).get("username_pin")
+    supplied = pin_hash(payload.pin, credentials["salt"])["hash"] if credentials else "0" * 64
+    expected = credentials["hash"] if credentials else "f" * 64
+    if not credentials or not hmac.compare_digest(supplied, expected):
+        attempts.append(now)
+        login_attempts[bucket] = attempts
+        raise HTTPException(status_code=401, detail="Home username or PIN did not match.")
+    login_attempts.pop(bucket, None)
+    household = data["household"]
+    response.set_cookie("family_home", make_token("", household["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return {"household": {k: v for k, v in household.items() if k != "username_pin"}, "members": [public_member(m) for m in data["members"]]}
+
+
+@app.get("/api/homes/current/profiles")
+def home_profiles(request: Request) -> dict[str, Any]:
+    token = read_token(request.cookies.get("family_home", ""))
+    if not token:
+        raise HTTPException(status_code=401, detail="Sign in to your home first")
+    data = home_data(token.get("h"))
+    if not data.get("household"):
+        raise HTTPException(status_code=404, detail="Home not found")
+    return {"household": {k: v for k, v in data["household"].items() if k != "username_pin"}, "members": [public_member(m) for m in data["members"]]}
+
+
+@app.post("/api/homes/logout")
+def logout_home(response: Response) -> dict[str, bool]:
+    response.delete_cookie("family_home", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+    response.delete_cookie("family_session", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+    return {"ok": True}
 
 
 @app.post("/api/setup")
@@ -233,6 +356,10 @@ def public_member(member: dict[str, Any]) -> dict[str, Any]:
     return {"id": member["id"], "name": member["name"], "email": member["email"], "role": member["role"], "activated": bool(member.get("pin")), "invited": bool(member.get("invite_token_hash"))}
 
 
+def public_household(household: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in household.items() if key not in {"username_pin"}}
+
+
 @app.post("/api/login")
 def login(payload: LoginInput, response: Response) -> dict[str, Any]:
     # Rate limit by profile so PIN guessing stays impractical even on a shared home network.
@@ -243,8 +370,10 @@ def login(payload: LoginInput, response: Response) -> dict[str, Any]:
     attempts = [stamp for stamp in login_attempts.get(bucket, []) if now - stamp < 900]
     if len(attempts) >= 10:
         raise HTTPException(status_code=429, detail="Too many tries. Please wait 15 minutes and try again.")
-    data = load_data()
-    member = next((m for m in data["members"] if m["id"] == payload.member_id), None)
+    data = next((h for h in all_homes() if any(m["id"] == payload.member_id for m in h.get("members", []))), None)
+    if data is None:
+        data = load_data()
+    member = next((m for m in data.get("members", []) if m["id"] == payload.member_id), None)
     if member and not member.get("pin"):
         raise HTTPException(status_code=403, detail="Ask the household organizer for a setup link to choose your PIN")
     supplied = pin_hash(payload.pin, member["pin"]["salt"])["hash"] if member else "0" * 64
@@ -267,7 +396,20 @@ def logout(response: Response) -> dict[str, bool]:
 @app.get("/api/me")
 def me(request: Request) -> dict[str, Any]:
     member, data = current_member(request)
-    return {"member": public_member(member), "household": data["household"], "members": [public_member(m) for m in data["members"]]}
+    return {"member": public_member(member), "household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]]}
+
+
+@app.post("/api/me/pin")
+def change_pin(payload: PinChangeInput, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    if not member.get("pin"):
+        raise HTTPException(status_code=400, detail="Set up your profile PIN using the organizer’s private link first")
+    supplied = pin_hash(payload.current_pin, member["pin"]["salt"])["hash"]
+    if not hmac.compare_digest(supplied, member["pin"]["hash"]):
+        raise HTTPException(status_code=401, detail="Your current PIN did not match")
+    member["pin"] = pin_hash(payload.new_pin)
+    save_data(data)
+    return {"ok": True}
 
 
 @app.get("/api/members/public")
@@ -329,18 +471,18 @@ def invited_member(token: str, data: dict[str, Any]) -> dict[str, Any] | None:
 
 @app.get("/api/invitations/{token}")
 def get_invitation(token: str) -> dict[str, str]:
-    member = invited_member(token, load_data())
-    if not member:
+    match = next(((data, invited_member(token, data)) for data in all_homes() if invited_member(token, data)), None)
+    if not match:
         raise HTTPException(status_code=404, detail="This setup link is invalid or has expired. Ask the household organizer to send a new one.")
-    return {"name": member["name"]}
+    return {"name": match[1]["name"]}
 
 
 @app.post("/api/invitations/activate")
 def activate_invitation(payload: ActivationInput, response: Response) -> dict[str, Any]:
-    data = load_data()
-    member = invited_member(payload.token, data)
-    if not member:
+    match = next(((data, invited_member(payload.token, data)) for data in all_homes() if invited_member(payload.token, data)), None)
+    if not match:
         raise HTTPException(status_code=404, detail="This setup link is invalid or has expired. Ask the household organizer to send a new one.")
+    data, member = match
     member["pin"] = pin_hash(payload.pin)
     member.pop("invite_token_hash", None)
     member.pop("invite_expires_at", None)

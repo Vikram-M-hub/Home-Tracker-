@@ -17,6 +17,8 @@ Open http://127.0.0.1:8000 and create the household. The organizer chooses a PIN
 
 ## Features
 
+- Multiple households on one website, with a unique home username and home PIN followed by per-person profile PINs. The person who creates a home becomes its organizer.
+- Members can change their own profile PIN after signing in. Organizers can add profiles through the existing private setup-link flow.
 - Guided household setup, profiles, private copyable setup links, and per-person PINs.
 - Personal task list and shared family board, assignees, due dates, priorities, notes, and progress updates. When someone completes another member’s task, the completed task moves to that person; reopening it returns it to its original assignee.
 - Open a task in an in-page details dialog. The creator can edit its title, assignee, due date, priority, and description or delete it; the server enforces creator-only access.
@@ -33,7 +35,7 @@ The app is prepared for a free Render web service and a free Neon Postgres datab
 4. Email is optional. Without a verified sender domain and Resend credentials, the organizer can copy each member’s setup link from the Family board and share it privately by WhatsApp or text. Links expire after seven days. Configure `RESEND_API_KEY` and `EMAIL_FROM` in Render to enable email delivery later.
 5. In GitHub repository Settings → Secrets and variables → Actions, add `PUBLIC_APP_URL` (the Render URL) and `REMINDER_JOB_TOKEN` (the same generated value shown in Render). The daily workflow sends due reminders at 9:00 a.m. India time; you can also run it manually from Actions.
 
-Render generates `SESSION_SECRET` and `REMINDER_JOB_TOKEN`; keep both private. `COOKIE_SECURE` is enabled for HTTPS. The database stores the single household as one JSON document and is suitable for this starter app. Do not set `FIRESTORE_COLLECTION` when using Neon.
+Render generates `SESSION_SECRET` and `REMINDER_JOB_TOKEN`; keep both private. `COOKIE_SECURE` is enabled for HTTPS. The database stores household records together in one JSON document, isolated by household ID. The original V2 V2 household remains available to the existing Android client. Do not set `FIRESTORE_COLLECTION` when using Neon.
 
 ## Email behavior
 
@@ -41,7 +43,8 @@ Setup links are one-time tokens that expire after seven days. Organizers can cop
 
 ## API
 
-- `POST /api/setup`, `POST /api/login`, `POST /api/logout`, `GET /api/me`
+- `POST /api/homes`, `POST /api/homes/login`, `GET /api/homes/current/profiles`, `POST /api/homes/logout`
+- `POST /api/setup` (legacy client), `POST /api/login`, `POST /api/me/pin`, `POST /api/logout`, `GET /api/me`
 - `GET /api/members/public`, `POST /api/members`, `POST /api/members/{id}/invite`
 - `GET /api/invitations/{token}`, `POST /api/invitations/activate`
 - `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/{task_id}` (status), `PATCH /api/tasks/{task_id}/details`, `DELETE /api/tasks/{task_id}`

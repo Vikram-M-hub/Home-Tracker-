@@ -15,6 +15,37 @@
   <main id="app" class="app-shell">
     <section id="loading" class="loading-screen"><span class="brand-mark">t</span><p>Getting your home in sync…</p></section>
 
+    <section id="home-screen" class="login-screen hidden">
+      <div class="setup-brand"><span class="brand-mark">t</span><span>Together</span></div>
+      <div class="login-card home-entry-card">
+        <div class="eyebrow">YOUR FAMILY, TOGETHER</div>
+        <h1>Welcome home.</h1>
+        <p>Sign in to your household or create a new home space.</p>
+        <form id="home-login-form">
+          <label>Home username<input name="username" required minlength="3" maxlength="32" autocomplete="username" placeholder="e.g. sharmahome"></label>
+          <label>Home PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password" placeholder="4–6 digits"></label>
+          <p id="home-login-error" class="field-error" aria-live="polite"></p>
+          <button class="button button-primary button-wide" type="submit">Continue to profiles <span>→</span></button>
+        </form>
+        <div id="home-profiles-wrap" class="home-profiles-wrap hidden"><div class="form-section-label">Choose your profile</div><div id="home-profile-list" class="profile-list"></div><form id="home-profile-login" class="hidden"><input type="hidden" name="member_id"><label id="home-profile-pin-label">Profile PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" placeholder="4–6 digits"></label><p id="home-profile-error" class="field-error" aria-live="polite"></p><button class="button button-primary button-wide" type="submit">Open my home <span>→</span></button></form></div>
+        <button id="toggle-create-home" class="text-button home-create-toggle" type="button">＋ Create a new home</button>
+        <form id="create-home-form" class="hidden">
+          <div class="form-section-label">Create your home space</div>
+          <label>Home name<input name="household_name" required maxlength="80" placeholder="The Sharma Home"></label>
+          <label>Home username<input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9._-]+" autocomplete="username" placeholder="sharmahome"></label>
+          <label>Home PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password" placeholder="Choose 4–6 digits"></label>
+          <label>Confirm home PIN<input name="confirm_home_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password" placeholder="Enter the home PIN again"></label>
+          <label>Your name <span class="optional">Home organizer</span><input name="organizer_name" required maxlength="60" placeholder="Your name"></label>
+          <label>Your profile PIN<input name="organizer_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password" placeholder="Choose 4–6 digits"></label>
+          <label>Confirm profile PIN<input name="confirm_organizer_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password" placeholder="Enter your profile PIN again"></label>
+          <p class="form-hint">Keep the home username and PIN safe. The organizer can add profiles, each with their own PIN.</p>
+          <p id="create-home-error" class="field-error" aria-live="polite"></p>
+          <button class="button button-primary button-wide" type="submit">Create home <span>→</span></button>
+        </form>
+        <button id="existing-home-login" class="text-button home-legacy-link" type="button">Sign in to the existing V2 V2 home</button>
+      </div>
+    </section>
+
     <section id="setup-screen" class="setup-screen hidden">
       <div class="setup-brand"><span class="brand-mark">t</span><span>Together</span></div>
       <div class="setup-card">
@@ -75,6 +106,7 @@
         <div class="topbar-actions">
           <span id="preview-badge" class="preview-badge hidden">SAMPLE PREVIEW</span>
           <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span id="theme-icon">☾</span></button>
+          <button id="change-pin-button" class="small-action" type="button">Change PIN</button>
           <button id="account-button" class="account-button" type="button"><span id="account-avatar" class="avatar">S</span><span class="account-name" id="account-name">Sam</span><span class="chevron">⌄</span></button>
         </div>
       </header>
@@ -151,6 +183,16 @@
       <label>Name<input name="name" required maxlength="60" placeholder="e.g. Asha"></label>
       <label>Email <span class="optional">Optional · for email alerts later</span><input name="email" type="email" maxlength="254" placeholder="asha@example.com"></label>
       <button class="button button-primary button-wide" type="submit">Add to our family <span>→</span></button>
+    </form>
+  </dialog>
+  <dialog id="change-pin-dialog" class="task-dialog">
+    <form id="change-pin-form" class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">YOUR PROFILE</div><h2>Change your PIN</h2></div><button id="close-change-pin" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <label>Current profile PIN<input name="current_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password"></label>
+      <label>New profile PIN<input name="new_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label>
+      <label>Confirm new PIN<input name="confirm_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label>
+      <p id="change-pin-error" class="field-error" aria-live="polite"></p>
+      <button class="button button-primary button-wide" type="submit">Save new PIN <span>→</span></button>
     </form>
   </dialog>
   <dialog id="invite-link-dialog" class="task-dialog invite-link-dialog">

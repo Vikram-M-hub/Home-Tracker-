@@ -12,7 +12,7 @@ async function api(path, options = {}) {
   return data;
 }
 function showScreen(id) {
-  ["loading", "setup-screen", "login-screen", "pin-setup-screen", "dashboard"].forEach(name => $(`#${name}`).classList.toggle("hidden", name !== id));
+  ["loading", "home-screen", "setup-screen", "login-screen", "pin-setup-screen", "dashboard"].forEach(name => document.getElementById(name).classList.toggle("hidden", name !== id));
 }
 function showToast(message) {
   const toast = $("#toast"); toast.textContent = message; toast.classList.add("visible");
@@ -50,13 +50,48 @@ async function start() {
     openDashboard({member:people[0],members:people,household:{name:"The Sharma Home"}});
     return;
   }
-  try {
-    const {configured} = await api("/api/setup/status");
-    if (!configured) { renderSetupProfiles(); showScreen("setup-screen"); return; }
-    try { const data = await api("/api/me"); openDashboard(data); }
-    catch { await showLogin(); }
-  } catch { showScreen("setup-screen"); showToast("Could not connect. Refresh to try again."); }
+  try { const data = await api("/api/me"); openDashboard(data); }
+  catch { showScreen("home-screen"); }
 }
+async function renderHomeProfiles(data) {
+  $("#home-profiles-wrap").classList.remove("hidden"); $("#home-login-form").classList.add("hidden"); $("#toggle-create-home").classList.add("hidden"); $("#existing-home-login").classList.add("hidden"); $("#create-home-form").classList.add("hidden");
+  $("#home-profile-list").innerHTML=data.members.map(profileCard).join("");
+  $$(".profile-option",$("#home-profile-list")).forEach(button=>button.addEventListener("click",()=>{
+    const selected=data.members.find(member=>member.id===button.dataset.member);
+    if(!selected.activated){$("#home-profile-error").textContent="This profile is waiting for its private setup link from the organizer.";return;}
+    $("#home-profile-error").textContent="";$("#home-profile-login [name=member_id]").value=selected.id;$("#home-profile-pin-label").firstChild.textContent=selected.name+"’s profile PIN";
+    $("#home-profile-login").classList.remove("hidden");$("#home-profile-login [name=pin]").value="";$("#home-profile-login [name=pin]").focus();
+    $$(".profile-option",$("#home-profile-list")).forEach(item=>item.classList.toggle("selected",item===button));
+  }));
+}
+$("#home-login-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#home-login-error");error.textContent="";
+  try{await api("/api/homes/login",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);}
+  catch(err){error.textContent=err.message;}
+});
+$("#toggle-create-home").addEventListener("click",()=>{$("#create-home-form").classList.toggle("hidden");$("#home-login-error").textContent="";});
+$("#create-home-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#create-home-error");error.textContent="";
+  if(f.get("pin")!==f.get("confirm_home_pin")){error.textContent="The home PINs don’t match.";return;}
+  if(f.get("organizer_pin")!==f.get("confirm_organizer_pin")){error.textContent="Your profile PINs don’t match.";return;}
+  try{await api("/api/homes",{method:"POST",body:JSON.stringify(Object.fromEntries(f))});const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);showToast("Home created. Sign in with your organizer profile PIN.");}
+  catch(err){error.textContent=err.message;}
+});
+$("#home-profile-login").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#home-profile-error");error.textContent="";
+  try{await api("/api/login",{method:"POST",body:JSON.stringify({member_id:f.get("member_id"),pin:f.get("pin")})});openDashboard(await api("/api/me"));}
+  catch(err){error.textContent=err.message;$("#home-profile-login [name=pin]").value="";}
+});
+$("#existing-home-login").addEventListener("click",()=>showLogin().catch(err=>showToast(err.message)));
+$("#change-pin-button").addEventListener("click",()=>{$("#change-pin-error").textContent="";$("#change-pin-dialog").showModal();});
+$("#close-change-pin").addEventListener("click",()=>$("#change-pin-dialog").close());
+$("#change-pin-dialog").addEventListener("click",e=>{if(e.target===$("#change-pin-dialog"))$("#change-pin-dialog").close();});
+$("#change-pin-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#change-pin-error");error.textContent="";
+  if(f.get("new_pin")!==f.get("confirm_pin")){error.textContent="The new PINs don’t match.";return;}
+  try{await api("/api/me/pin",{method:"POST",body:JSON.stringify({current_pin:f.get("current_pin"),new_pin:f.get("new_pin")})});$("#change-pin-dialog").close();e.currentTarget.reset();showToast("Your profile PIN has been changed.");}
+  catch(err){error.textContent=err.message;}
+});
 $("#activation-form").addEventListener("submit", async e => {
   e.preventDefault(); const form=e.currentTarget; const pin=$("#new-pin").value; const confirm=$("#confirm-pin").value; const error=$("#activation-error"); error.textContent="";
   if(pin!==confirm){error.textContent="Those PINs don’t match. Please enter them again.";return;}
@@ -225,7 +260,7 @@ $("#login-form").addEventListener("submit", async e => {
   try { await api("/api/login", {method:"POST",body:JSON.stringify({member_id:$("[name=member_id]",form).value,pin:$("[name=pin]",form).value})}); openDashboard(await api("/api/me")); }
   catch(error) { err.textContent = error.message; $("#login-pin").value = ""; $("#login-pin").focus(); }
 });
-$("#account-button").addEventListener("click", async () => { if(previewMode){showToast("You’re viewing a sample family space");return;} await api("/api/logout", {method:"POST"}); state.me = null; await showLogin(); });
+$("#account-button").addEventListener("click", async () => { if(previewMode){showToast("You’re viewing a sample family space");return;} await api("/api/logout", {method:"POST"}); await api("/api/homes/logout",{method:"POST"}).catch(()=>{}); state.me = null; showScreen("home-screen"); });
 $("#task-form").addEventListener("submit", async e => {
   e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note")};
   try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; await loadTasks(); showToast(result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
