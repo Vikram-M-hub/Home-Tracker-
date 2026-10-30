@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import threading
 import urllib.error
@@ -89,7 +90,7 @@ def load_data() -> dict[str, Any]:
 def home_data(home_id: str | None = None) -> dict[str, Any]:
     """Read one home while retaining the original single-home record for compatibility."""
     root = load_data()
-    if home_id and root.get("household", {}).get("id") == home_id:
+    if home_id and (root.get("household") or {}).get("id") == home_id:
         return {k: root[k] for k in ("household", "members", "tasks") if k in root}
     if home_id and home_id in root.get("homes", {}):
         return root["homes"][home_id]
@@ -102,7 +103,7 @@ def save_home(data: dict[str, Any]) -> None:
     home_id = household.get("id")
     if not home_id:
         raise HTTPException(status_code=400, detail="Home information is missing")
-    if root.get("household", {}).get("id") == home_id or not root.get("household"):
+    if (root.get("household") or {}).get("id") == home_id or not root.get("household"):
         root.update(data)
         root.setdefault("homes", {})
     else:
@@ -161,17 +162,83 @@ def pin_hash(pin: str, salt: str | None = None) -> dict[str, str]:
     return {"salt": salt, "hash": result}
 
 
+def create_recovery_code() -> str:
+    value = secrets.token_hex(16).upper()
+    return "-".join(value[index:index + 4] for index in range(0, len(value), 4))
+
+
+def recovery_code_hash(code: str) -> str:
+    normalized = re.sub(r"[^A-Fa-f0-9]", "", code).upper()
+    return hashlib.sha256(normalized.encode("ascii")).hexdigest()
+
+
+def check_rate_limit(bucket: str, limit: int = 5, period: int = 900) -> None:
+    import time
+
+    now = time.time()
+    attempts = [stamp for stamp in login_attempts.get(bucket, []) if now - stamp < period]
+    if len(attempts) >= limit:
+        raise HTTPException(status_code=429, detail="Too many tries. Please wait 15 minutes and try again.")
+    attempts.append(now)
+    login_attempts[bucket] = attempts
+
+
+def clear_rate_limit(bucket: str) -> None:
+    login_attempts.pop(bucket, None)
+
+
+def client_bucket(request: Request, purpose: str) -> str:
+    address = request.client.host if request.client else "unknown"
+    return f"{purpose}:{address}"
+
+
+def verify_home_credentials(username: str, pin: str) -> dict[str, Any] | None:
+    normalized = username.strip().lower()
+    data = next((home for home in all_homes() if (home.get("household") or {}).get("username", "").lower() == normalized), None)
+    credentials = (data or {}).get("household", {}).get("username_pin")
+    supplied = pin_hash(pin, credentials["salt"])["hash"] if credentials else "0" * 64
+    expected = credentials["hash"] if credentials else "f" * 64
+    return data if credentials and hmac.compare_digest(supplied, expected) else None
+
+
+def unique_home_username(username: str, exclude_home_id: str | None = None) -> str:
+    normalized = username.strip().lower()
+    if any((home.get("household") or {}).get("username", "").lower() == normalized and (home.get("household") or {}).get("id") != exclude_home_id for home in all_homes()):
+        raise HTTPException(status_code=409, detail="That home username is already taken. Choose another one.")
+    return normalized
+
+
+def primary_organizer_id(data: dict[str, Any]) -> str | None:
+    household = data.get("household") or {}
+    primary = household.get("primary_organizer_id")
+    if primary and any(member.get("id") == primary for member in data.get("members", [])):
+        return primary
+    organizer = next((member for member in data.get("members", []) if member.get("role") == "admin"), None)
+    return organizer.get("id") if organizer else None
+
+
+def log_security_event(data: dict[str, Any], action: str, member_id: str | None = None) -> None:
+    events = data.setdefault("security_events", [])
+    events.append({"action": action, "member_id": member_id, "at": now_iso()})
+    del events[:-50]
+
+
+def invalidate_profile_sessions(data: dict[str, Any]) -> None:
+    for member in data.get("members", []):
+        member["session_version"] = member.get("session_version", 0) + 1
+
+
 def _b64(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode().rstrip("=")
 
 
-def make_token(member_id: str, household_id: str) -> str:
-    payload = _b64(json.dumps({"m": member_id, "h": household_id, "e": int(datetime.now(timezone.utc).timestamp()) + 60 * 60 * 24 * 30}).encode())
+def make_token(member_id: str, household_id: str, profile_version: int = 0) -> str:
+    payload = _b64(json.dumps({"m": member_id, "h": household_id, "e": int(datetime.now(timezone.utc).timestamp()) + 60 * 60 * 24 * 30, "v": profile_version}).encode())
     signature = _b64(hmac.new(TOKEN_SECRET, payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{signature}"
 
 
-def read_token(token: str) -> dict[str, str] | None:
+def read_token(token: str) -> dict[str, Any] | None:
     try:
         payload, signature = token.split(".", 1)
         expected = _b64(hmac.new(TOKEN_SECRET, payload.encode(), hashlib.sha256).digest())
@@ -193,6 +260,8 @@ def current_member(request: Request, data: dict[str, Any] | None = None) -> tupl
     member = next((m for m in data["members"] if m["id"] == token.get("m")), None)
     if not member:
         raise HTTPException(status_code=401, detail="This family profile is no longer available")
+    if token.get("v", 0) != member.get("session_version", 0):
+        raise HTTPException(status_code=401, detail="Your profile PIN changed. Please sign in again.")
     return member, data
 
 
@@ -218,6 +287,36 @@ class HomeCreateInput(BaseModel):
 class HomeLoginInput(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class ProfilePinResetInput(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    home_pin: str = Field(pattern=r"^\d{4,6}$")
+    member_id: str
+    new_pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class HomeRecoveryCodeInput(BaseModel):
+    recovery_code: str = Field(min_length=20, max_length=40)
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9._-]+$")
+    pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class BackupOrganizerRecoveryInput(BaseModel):
+    household_name: str = Field(min_length=1, max_length=80)
+    organizer_name: str = Field(min_length=1, max_length=60)
+    organizer_pin: str = Field(pattern=r"^\d{4,6}$")
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9._-]+$")
+    pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class RecoveryCodeSetupInput(BaseModel):
+    current_pin: str = Field(pattern=r"^\d{4,6}$")
+
+
+class BackupOrganizerSetupInput(BaseModel):
+    current_pin: str = Field(pattern=r"^\d{4,6}$")
+    member_id: str | None = None
 
 
 class PinChangeInput(BaseModel):
@@ -288,15 +387,15 @@ def setup_status() -> dict[str, bool]:
 
 @app.post("/api/homes")
 def create_home(payload: HomeCreateInput, request: Request, response: Response) -> dict[str, Any]:
-    username = payload.username.strip().lower()
-    if any((h.get("household") or {}).get("username", "").lower() == username for h in all_homes()):
-        raise HTTPException(status_code=409, detail="That home username is already taken. Choose another one.")
-    household = {"id": str(uuid4()), "name": payload.household_name.strip(), "username": username, "username_pin": pin_hash(payload.pin), "timezone": TZ_NAME, "created_at": now_iso()}
-    organizer = {"id": str(uuid4()), "name": payload.organizer_name.strip(), "email": "", "pin": pin_hash(payload.organizer_pin), "role": "admin", "created_at": now_iso()}
+    username = unique_home_username(payload.username)
+    organizer_id = str(uuid4())
+    recovery_code = create_recovery_code()
+    household = {"id": str(uuid4()), "name": payload.household_name.strip(), "username": username, "username_pin": pin_hash(payload.pin), "recovery_code_hash": recovery_code_hash(recovery_code), "primary_organizer_id": organizer_id, "timezone": TZ_NAME, "created_at": now_iso()}
+    organizer = {"id": organizer_id, "name": payload.organizer_name.strip(), "email": "", "pin": pin_hash(payload.organizer_pin), "session_version": 0, "role": "admin", "created_at": now_iso()}
     data = {"household": household, "members": [organizer], "tasks": []}
     save_home(data)
     response.set_cookie("family_home", make_token("", household["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
-    return {"household": {k: v for k, v in household.items() if k != "username_pin"}, "member": public_member(organizer), "members": [public_member(organizer)]}
+    return {"household": public_household(household), "member": public_member(organizer), "members": [public_member(organizer)], "recovery_code": recovery_code}
 
 
 @app.post("/api/homes/login")
@@ -308,18 +407,15 @@ def login_home(payload: HomeLoginInput, response: Response) -> dict[str, Any]:
     attempts = [stamp for stamp in login_attempts.get(bucket, []) if now - stamp < 900]
     if len(attempts) >= 10:
         raise HTTPException(status_code=429, detail="Too many tries. Please wait 15 minutes and try again.")
-    data = next((h for h in all_homes() if (h.get("household") or {}).get("username", "").lower() == username), None)
-    credentials = (data or {}).get("household", {}).get("username_pin")
-    supplied = pin_hash(payload.pin, credentials["salt"])["hash"] if credentials else "0" * 64
-    expected = credentials["hash"] if credentials else "f" * 64
-    if not credentials or not hmac.compare_digest(supplied, expected):
+    data = verify_home_credentials(username, payload.pin)
+    if not data:
         attempts.append(now)
         login_attempts[bucket] = attempts
         raise HTTPException(status_code=401, detail="Home username or PIN did not match.")
     login_attempts.pop(bucket, None)
     household = data["household"]
     response.set_cookie("family_home", make_token("", household["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
-    return {"household": {k: v for k, v in household.items() if k != "username_pin"}, "members": [public_member(m) for m in data["members"]]}
+    return {"household": public_household(household), "members": [public_member(m) for m in data["members"]]}
 
 
 @app.get("/api/homes/current/profiles")
@@ -330,7 +426,81 @@ def home_profiles(request: Request) -> dict[str, Any]:
     data = home_data(token.get("h"))
     if not data.get("household"):
         raise HTTPException(status_code=404, detail="Home not found")
-    return {"household": {k: v for k, v in data["household"].items() if k != "username_pin"}, "members": [public_member(m) for m in data["members"]]}
+    return {"household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]]}
+
+
+@app.post("/api/homes/profile-pin-reset")
+def reset_profile_pin(payload: ProfilePinResetInput, request: Request) -> dict[str, bool]:
+    bucket = client_bucket(request, "profile-reset")
+    check_rate_limit(bucket)
+    data = verify_home_credentials(payload.username, payload.home_pin)
+    member = next((item for item in (data or {}).get("members", []) if item.get("id") == payload.member_id), None)
+    if not data or not member or not member.get("pin"):
+        raise HTTPException(status_code=401, detail="Couldn’t verify those home details. Check the username and PIN, then try again.")
+    member["pin"] = pin_hash(payload.new_pin)
+    member["session_version"] = member.get("session_version", 0) + 1
+    log_security_event(data, "profile_pin_reset", member["id"])
+    save_home(data)
+    clear_rate_limit(bucket)
+    return {"ok": True}
+
+
+@app.post("/api/homes/recover/code")
+def recover_home_with_code(payload: HomeRecoveryCodeInput, request: Request, response: Response) -> dict[str, Any]:
+    bucket = client_bucket(request, "home-recovery")
+    check_rate_limit(bucket)
+    supplied_hash = recovery_code_hash(payload.recovery_code)
+    data = next((home for home in all_homes() if (home.get("household") or {}).get("recovery_code_hash") and hmac.compare_digest((home["household"].get("recovery_code_hash") or ""), supplied_hash)), None)
+    if not data:
+        raise HTTPException(status_code=401, detail="That recovery code could not be verified. Check it and try again.")
+    username = unique_home_username(payload.username, data["household"]["id"])
+    data["household"]["username"] = username
+    data["household"]["username_pin"] = pin_hash(payload.pin)
+    recovery_code = create_recovery_code()
+    data["household"]["recovery_code_hash"] = recovery_code_hash(recovery_code)
+    invalidate_profile_sessions(data)
+    log_security_event(data, "home_recovered_with_code")
+    save_home(data)
+    clear_rate_limit(bucket)
+    response.set_cookie("family_home", make_token("", data["household"]["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.delete_cookie("family_session", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+    return {"household": public_household(data["household"]), "members": [public_member(item) for item in data["members"]], "recovery_code": recovery_code}
+
+
+@app.post("/api/homes/recover/backup-organizer")
+def recover_home_with_backup_organizer(payload: BackupOrganizerRecoveryInput, request: Request, response: Response) -> dict[str, Any]:
+    bucket = client_bucket(request, "home-recovery")
+    check_rate_limit(bucket)
+    home_name = payload.household_name.strip().casefold()
+    organizer_name = payload.organizer_name.strip().casefold()
+    matches: list[dict[str, Any]] = []
+    for home in all_homes():
+        household = home.get("household") or {}
+        if household.get("name", "").strip().casefold() != home_name:
+            continue
+        recovery_id = household.get("recovery_organizer_id")
+        backup = next((item for item in home.get("members", []) if item.get("id") == recovery_id and item.get("role") == "admin"), None)
+        if not backup or backup.get("name", "").strip().casefold() != organizer_name or not backup.get("pin"):
+            continue
+        supplied = pin_hash(payload.organizer_pin, backup["pin"]["salt"])["hash"]
+        if hmac.compare_digest(supplied, backup["pin"]["hash"]):
+            matches.append(home)
+    if len(matches) != 1:
+        raise HTTPException(status_code=401, detail="Couldn’t verify the backup organizer. Check the home name, profile name and profile PIN.")
+    data = matches[0]
+    username = unique_home_username(payload.username, data["household"]["id"])
+    data["household"]["username"] = username
+    data["household"]["username_pin"] = pin_hash(payload.pin)
+    recovery_code = create_recovery_code()
+    data["household"]["recovery_code_hash"] = recovery_code_hash(recovery_code)
+    invalidate_profile_sessions(data)
+    backup_id = data["household"].get("recovery_organizer_id")
+    log_security_event(data, "home_recovered_with_backup_organizer", backup_id)
+    save_home(data)
+    clear_rate_limit(bucket)
+    response.set_cookie("family_home", make_token("", data["household"]["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.delete_cookie("family_session", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+    return {"household": public_household(data["household"]), "members": [public_member(item) for item in data["members"]], "recovery_code": recovery_code}
 
 
 @app.post("/api/homes/logout")
@@ -345,13 +515,71 @@ def set_home_credentials(payload: HomeCredentialsInput, request: Request) -> dic
     member, data = current_member(request)
     if member["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only the household organizer can change the home sign-in")
-    username = payload.username.strip().lower()
-    if any((h.get("household") or {}).get("username", "").lower() == username and (h.get("household") or {}).get("id") != data["household"]["id"] for h in all_homes()):
-        raise HTTPException(status_code=409, detail="That home username is already taken. Choose another one.")
+    username = unique_home_username(payload.username, data["household"]["id"])
     data["household"]["username"] = username
     data["household"]["username_pin"] = pin_hash(payload.pin)
     save_data(data)
     return {"household": public_household(data["household"])}
+
+
+@app.get("/api/homes/current/recovery-settings")
+def recovery_settings(request: Request) -> dict[str, Any]:
+    member, data = current_member(request)
+    if member.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only a household organizer can manage recovery options")
+    household = data["household"]
+    backup = next((item for item in data["members"] if item.get("id") == household.get("recovery_organizer_id")), None)
+    is_primary = member["id"] == primary_organizer_id(data)
+    return {
+        "recovery_code_configured": bool(household.get("recovery_code_hash")),
+        "recovery_organizer": public_member(backup) if backup else None,
+        "members": [public_member(item) for item in data["members"]],
+        "can_manage_backup_organizer": is_primary,
+    }
+
+
+@app.post("/api/homes/current/recovery-code")
+def replace_recovery_code(payload: RecoveryCodeSetupInput, request: Request) -> dict[str, str]:
+    member, data = current_member(request)
+    if member.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only a household organizer can manage recovery options")
+    supplied = pin_hash(payload.current_pin, member["pin"]["salt"])["hash"]
+    if not hmac.compare_digest(supplied, member["pin"]["hash"]):
+        raise HTTPException(status_code=401, detail="Your profile PIN did not match")
+    recovery_code = create_recovery_code()
+    data["household"]["recovery_code_hash"] = recovery_code_hash(recovery_code)
+    log_security_event(data, "recovery_code_replaced", member["id"])
+    save_home(data)
+    return {"recovery_code": recovery_code}
+
+
+@app.put("/api/homes/current/recovery-organizer")
+def set_recovery_organizer(payload: BackupOrganizerSetupInput, request: Request) -> dict[str, Any]:
+    member, data = current_member(request)
+    if member.get("role") != "admin" or member["id"] != primary_organizer_id(data):
+        raise HTTPException(status_code=403, detail="Only the original household organizer can choose the backup organizer")
+    supplied = pin_hash(payload.current_pin, member["pin"]["salt"])["hash"]
+    if not hmac.compare_digest(supplied, member["pin"]["hash"]):
+        raise HTTPException(status_code=401, detail="Your profile PIN did not match")
+
+    household = data["household"]
+    household["primary_organizer_id"] = member["id"]
+    previous_id = household.get("recovery_organizer_id")
+    previous = next((item for item in data["members"] if item.get("id") == previous_id), None)
+    if previous and previous["id"] != member["id"]:
+        previous["role"] = "member"
+
+    target = next((item for item in data["members"] if item.get("id") == payload.member_id), None) if payload.member_id else None
+    if payload.member_id and (not target or target["id"] == member["id"] or not target.get("pin")):
+        raise HTTPException(status_code=422, detail="Choose an active family profile other than yourself")
+    if target:
+        target["role"] = "admin"
+        household["recovery_organizer_id"] = target["id"]
+    else:
+        household.pop("recovery_organizer_id", None)
+    log_security_event(data, "backup_organizer_changed", target["id"] if target else None)
+    save_home(data)
+    return {"recovery_organizer": public_member(target) if target else None}
 
 
 @app.post("/api/setup")
@@ -362,12 +590,13 @@ def setup(payload: SetupInput, request: Request, response: Response) -> dict[str
     household = {"id": str(uuid4()), "name": payload.household_name.strip(), "timezone": TZ_NAME, "created_at": now_iso()}
     members = []
     for index, item in enumerate(payload.members):
-        members.append({"id": str(uuid4()), "name": item.name.strip(), "email": item.email.strip(), "pin": pin_hash(payload.organizer_pin) if index == 0 else None, "role": "admin" if index == 0 else "member", "created_at": now_iso()})
+        members.append({"id": str(uuid4()), "name": item.name.strip(), "email": item.email.strip(), "pin": pin_hash(payload.organizer_pin) if index == 0 else None, "session_version": 0, "role": "admin" if index == 0 else "member", "created_at": now_iso()})
+    household["primary_organizer_id"] = members[0]["id"]
     data = {"household": household, "members": members, "tasks": []}
     base_url = os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/"))
     invite_results = [issue_invitation(item, base_url)[0] for item in members[1:]]
     save_data(data)
-    response.set_cookie("family_session", make_token(members[0]["id"], household["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.set_cookie("family_session", make_token(members[0]["id"], household["id"], members[0].get("session_version", 0)), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
     return {"household": household, "member": public_member(members[0]), "invites_sent": sum(invite_results), "invites_pending": len(members) - 1 - sum(invite_results)}
 
 
@@ -376,7 +605,7 @@ def public_member(member: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_household(household: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in household.items() if key not in {"username_pin"}}
+    return {key: value for key, value in household.items() if key not in {"username_pin", "recovery_code_hash", "primary_organizer_id", "recovery_organizer_id"}}
 
 
 @app.post("/api/login")
@@ -402,8 +631,8 @@ def login(payload: LoginInput, response: Response) -> dict[str, Any]:
         login_attempts[bucket] = attempts
         raise HTTPException(status_code=401, detail="That PIN did not match. Please try again.")
     login_attempts.pop(bucket, None)
-    response.set_cookie("family_session", make_token(member["id"], data["household"]["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
-    return {"member": public_member(member), "household": data["household"]}
+    response.set_cookie("family_session", make_token(member["id"], data["household"]["id"], member.get("session_version", 0)), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return {"member": public_member(member), "household": public_household(data["household"])}
 
 
 @app.post("/api/logout")
@@ -427,8 +656,9 @@ def change_pin(payload: PinChangeInput, request: Request) -> dict[str, bool]:
     if not hmac.compare_digest(supplied, member["pin"]["hash"]):
         raise HTTPException(status_code=401, detail="Your current PIN did not match")
     member["pin"] = pin_hash(payload.new_pin)
+    member["session_version"] = member.get("session_version", 0) + 1
     save_data(data)
-    return {"ok": True}
+    return {"ok": True, "reauth_required": True}
 
 
 @app.get("/api/members/public")
@@ -444,7 +674,7 @@ def add_member(payload: MemberAdd, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="Only the household organizer can add members")
     if payload.email and any(m["email"].lower() == payload.email.lower() for m in data["members"]):
         raise HTTPException(status_code=409, detail="That email is already in this household")
-    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "role": "member", "created_at": now_iso()}
+    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "session_version": 0, "role": "member", "created_at": now_iso()}
     data["members"].append(added)
     invitation_sent, invite_url = issue_invitation(added, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
     save_data(data)
@@ -506,7 +736,7 @@ def activate_invitation(payload: ActivationInput, response: Response) -> dict[st
     member.pop("invite_token_hash", None)
     member.pop("invite_expires_at", None)
     save_data(data)
-    response.set_cookie("family_session", make_token(member["id"], data["household"]["id"]), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.set_cookie("family_session", make_token(member["id"], data["household"]["id"], member.get("session_version", 0)), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
     return {"member": public_member(member), "household": data["household"]}
 
 

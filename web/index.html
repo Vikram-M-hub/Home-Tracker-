@@ -8,7 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/styles.css?v=task-search-1">
+  <link rel="stylesheet" href="assets/styles.css?v=recovery-1">
+  <link rel="stylesheet" href="assets/recovery.css?v=recovery-1">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -27,7 +28,8 @@
           <p id="home-login-error" class="field-error" aria-live="polite"></p>
           <button class="button button-primary button-wide" type="submit">Continue to profiles <span>→</span></button>
         </form>
-        <div id="home-profiles-wrap" class="home-profiles-wrap hidden"><div class="form-section-label">Choose your profile</div><div id="home-profile-list" class="profile-list"></div><form id="home-profile-login" class="hidden"><input type="hidden" name="member_id"><label id="home-profile-pin-label">Profile PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" placeholder="4–6 digits"></label><p id="home-profile-error" class="field-error" aria-live="polite"></p><button class="button button-primary button-wide" type="submit">Open my home <span>→</span></button></form><button id="sign-out-home" class="button button-secondary button-wide" type="button">Sign out of this home</button></div>
+        <button id="forgot-home-button" class="text-button recovery-link" type="button">Forgot home username or PIN?</button>
+        <div id="home-profiles-wrap" class="home-profiles-wrap hidden"><div class="form-section-label">Choose your profile</div><div id="home-profile-list" class="profile-list"></div><button id="home-profile-reset-toggle" class="text-button recovery-link" type="button">Forgot a profile PIN?</button><form id="home-profile-reset-form" class="hidden recovery-inline-form"><div class="form-section-label">Reset a profile PIN</div><label>Profile to reset<select name="member_id" required></select></label><label>Home username<input name="username" required minlength="3" maxlength="32" autocomplete="username" placeholder="Your home username"></label><label>Home PIN<input name="home_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password"></label><label>New profile PIN<input name="new_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label><label>Confirm new profile PIN<input name="confirm_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label><p id="home-profile-reset-error" class="field-error" aria-live="polite"></p><button class="button button-primary button-wide" type="submit">Save new profile PIN <span>→</span></button></form><form id="home-profile-login" class="hidden"><input type="hidden" name="member_id"><label id="home-profile-pin-label">Profile PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" placeholder="4–6 digits"></label><p id="home-profile-error" class="field-error" aria-live="polite"></p><button class="button button-primary button-wide" type="submit">Open my home <span>→</span></button></form><button id="sign-out-home" class="button button-secondary button-wide" type="button">Sign out of this home</button></div>
         <button id="toggle-create-home" class="text-button home-create-toggle" type="button">＋ Create a new home</button>
         <form id="create-home-form" class="hidden">
           <div class="form-section-label">Create your home space</div>
@@ -135,7 +137,7 @@
           <div class="family-stats" id="family-stats"></div>
           <div id="member-notices" class="member-notices hidden"></div>
           <label class="task-search family-task-search"><span aria-hidden="true">⌕</span><input id="family-task-search" type="search" placeholder="Search family tasks" aria-label="Search family tasks"></label>
-          <div class="board-toolbar"><div class="board-filters" role="group" aria-label="Filter tasks"><button class="filter-chip selected" data-filter="all" type="button">All tasks</button><button class="filter-chip" data-filter="todo" type="button">To do</button><button class="filter-chip" data-filter="in_progress" type="button">In progress</button><button class="filter-chip" data-filter="done" type="button">Done</button></div><div class="board-tools"><label class="member-filter"><span class="sr-only">Filter by family member</span><select id="member-filter"><option value="all">Everyone</option></select></label><button id="manage-members" class="small-action hidden" type="button">＋ Family member</button></div></div>
+          <div class="board-toolbar"><div class="board-filters" role="group" aria-label="Filter tasks"><button class="filter-chip selected" data-filter="all" type="button">All tasks</button><button class="filter-chip" data-filter="todo" type="button">To do</button><button class="filter-chip" data-filter="in_progress" type="button">In progress</button><button class="filter-chip" data-filter="done" type="button">Done</button></div><div class="board-tools"><label class="member-filter"><span class="sr-only">Filter by family member</span><select id="member-filter"><option value="all">Everyone</option></select></label><button id="recovery-options-button" class="small-action hidden" type="button">Recovery options</button><button id="manage-members" class="small-action hidden" type="button">＋ Family member</button></div></div>
           <div class="task-list family-list" id="family-task-list"></div>
           <div id="family-empty" class="empty-state hidden"><div class="empty-illustration"><span>＋</span></div><h3>A clean slate</h3><p>Add the first task and get the family moving.</p><button class="button button-primary" id="family-empty-add" type="button">Add a task</button></div>
           <div id="family-no-results" class="empty-state hidden"><h3>No matching tasks</h3><p>Try a different word or clear your search.</p><button class="button button-secondary" id="clear-family-search" type="button">Clear search</button></div>
@@ -210,6 +212,63 @@
       <button class="button button-primary button-wide" type="submit">Save home sign-in <span>→</span></button>
     </form>
   </dialog>
+  <dialog id="home-recovery-dialog" class="task-dialog recovery-dialog">
+    <div class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">HOUSEHOLD ACCESS</div><h2>Recover home sign-in</h2></div><button id="close-home-recovery" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <p class="invite-copy">Choose one way to prove you’re an organizer. Recovery replaces the home username and PIN and gives you a fresh recovery code.</p>
+      <form id="recover-home-code-form" class="recovery-method-form">
+        <div class="form-section-label">Use your recovery code</div>
+        <label>One-time recovery code<input name="recovery_code" required minlength="20" maxlength="40" autocomplete="off" placeholder="ABCD-EF12-…"></label>
+        <label>New home username<input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9._-]+" autocomplete="username" placeholder="Choose a username"></label>
+        <label>New home PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label>
+        <label>Confirm new home PIN<input name="confirm_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label>
+        <p id="recover-home-code-error" class="field-error" aria-live="polite"></p>
+        <button class="button button-primary button-wide" type="submit">Recover with code <span>→</span></button>
+      </form>
+      <form id="recover-home-organizer-form" class="recovery-method-form">
+        <div class="form-section-label">Use your backup organizer profile</div>
+        <label>Home name<input name="household_name" required maxlength="80" placeholder="The Sharma Home"></label>
+        <label>Backup organizer’s profile name<input name="organizer_name" required maxlength="60" placeholder="Their profile name"></label>
+        <label>Backup organizer’s profile PIN<input name="organizer_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password"></label>
+        <label>New home username<input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9._-]+" autocomplete="username" placeholder="Choose a username"></label>
+        <label>New home PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label>
+        <label>Confirm new home PIN<input name="confirm_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password"></label>
+        <p id="recover-home-organizer-error" class="field-error" aria-live="polite"></p>
+        <button class="button button-secondary button-wide" type="submit">Recover as backup organizer <span>→</span></button>
+      </form>
+    </div>
+  </dialog>
+  <dialog id="recovery-code-dialog" class="task-dialog">
+    <div class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">SAVE THIS SOMEWHERE SAFE</div><h2>Your recovery code</h2></div><button id="close-recovery-code" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <p class="invite-copy">This code is shown only once. Save it in a private place. It can replace the home username and PIN, so don’t share it with anyone.</p>
+      <label>One-time recovery code<input id="recovery-code-value" readonly autocomplete="off"></label>
+      <button id="copy-recovery-code" class="button button-primary button-wide" type="button">Copy recovery code <span>⧉</span></button>
+      <button id="done-recovery-code" class="button button-secondary button-wide" type="button">I’ve saved it</button>
+    </div>
+  </dialog>
+  <dialog id="recovery-options-dialog" class="task-dialog recovery-dialog">
+    <div class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">HOUSEHOLD ORGANIZER</div><h2>Recovery options</h2></div><button id="close-recovery-options" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <p id="recovery-options-status" class="invite-copy">Loading recovery settings…</p>
+      <form id="recovery-code-form" class="recovery-method-form">
+        <div class="form-section-label">Create or replace the recovery code</div>
+        <p class="form-hint recovery-form-hint">Replacing it immediately invalidates the old code. The new code will be shown once.</p>
+        <label>Your profile PIN<input name="current_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password"></label>
+        <p id="recovery-code-error" class="field-error" aria-live="polite"></p>
+        <button class="button button-primary button-wide" type="submit">Generate recovery code <span>→</span></button>
+      </form>
+      <form id="backup-organizer-form" class="recovery-method-form hidden">
+        <div class="form-section-label">Choose one backup organizer</div>
+        <p class="form-hint recovery-form-hint">They can recover the home username and PIN with their profile name and profile PIN. This also gives them organizer access to manage family profiles and home settings. Only an active profile can be selected.</p>
+        <label>Backup organizer<select name="member_id"><option value="">No backup organizer</option></select></label>
+        <label>Your profile PIN<input name="current_pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password"></label>
+        <p id="backup-organizer-error" class="field-error" aria-live="polite"></p>
+        <button class="button button-secondary button-wide" type="submit">Save backup organizer <span>→</span></button>
+      </form>
+      <p id="backup-organizer-limited" class="form-hint hidden">Only the original organizer can choose or change the backup organizer.</p>
+    </div>
+  </dialog>
   <dialog id="invite-link-dialog" class="task-dialog invite-link-dialog">
     <div class="dialog-form">
       <div class="dialog-top"><div><div class="eyebrow">PROFILE SETUP</div><h2>Share a setup link</h2></div><button id="close-invite-link" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
@@ -219,6 +278,6 @@
       <p class="form-hint">Anyone with this link can set up this profile. Share it only with the intended person.</p>
     </div>
   </dialog>
-  <script src="assets/app.js?v=task-search-1" defer></script>
+  <script src="assets/app.js?v=recovery-1" defer></script>
 </body>
 </html>

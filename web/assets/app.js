@@ -19,7 +19,8 @@ function showToast(message) {
   clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove("visible"), 2800);
 }
 function profileCard(member) {
-  return `<button class="profile-option" type="button" data-member="${escapeHtml(member.id)}"><span class="avatar avatar-large">${escapeHtml(initials(member.name))}</span><span class="profile-option-name">${escapeHtml(member.name)}${member.activated ? "" : '<small>PIN setup needed</small>'}</span><span class="profile-arrow">→</span></button>`;
+  const note = !member.activated ? "PIN setup needed" : member.role === "admin" ? "Home organizer" : "";
+  return `<button class="profile-option" type="button" data-member="${escapeHtml(member.id)}"><span class="avatar avatar-large">${escapeHtml(initials(member.name))}</span><span class="profile-option-name">${escapeHtml(member.name)}${note ? `<small>${note}</small>` : ""}</span><span class="profile-arrow">→</span></button>`;
 }
 function renderSetupProfiles() {
   const host = $("#setup-members");
@@ -58,11 +59,15 @@ async function start() {
 }
 async function renderHomeProfiles(data) {
   $("#home-profiles-wrap").classList.remove("hidden"); $("#home-login-form").classList.add("hidden"); $("#toggle-create-home").classList.add("hidden"); $("#create-home-form").classList.add("hidden");
-  $("#home-profile-login").classList.add("hidden"); $("#home-profile-login").reset();
+  $("#forgot-home-button").classList.add("hidden");
+  $("#home-profile-login").classList.add("hidden"); $("#home-profile-login").reset(); $("#home-profile-reset-form").classList.add("hidden"); $("#home-profile-reset-form").reset();
+  const resetSelect=$("#home-profile-reset-form [name=member_id]");
+  resetSelect.innerHTML=data.members.filter(member=>member.activated).map(member=>`<option value="${escapeHtml(member.id)}">${escapeHtml(member.name)}</option>`).join("");
   $("#home-profile-list").innerHTML=data.members.map(profileCard).join("");
   $$(".profile-option",$("#home-profile-list")).forEach(button=>button.addEventListener("click",()=>{
     const selected=data.members.find(member=>member.id===button.dataset.member);
     if(!selected.activated){$("#home-profile-error").textContent="This profile is waiting for its private setup link from the organizer.";return;}
+    $("#home-profile-reset-form").classList.add("hidden");$("#home-profile-reset-form").reset();
     $("#home-profile-error").textContent="";$("#home-profile-login [name=member_id]").value=selected.id;$("#home-profile-pin-label").firstChild.textContent=selected.name+"’s profile PIN";
     $("#home-profile-login").classList.remove("hidden");$("#home-profile-login [name=pin]").value="";$("#home-profile-login [name=pin]").focus();
     $$(".profile-option",$("#home-profile-list")).forEach(item=>item.classList.toggle("selected",item===button));
@@ -73,13 +78,66 @@ $("#home-login-form").addEventListener("submit",async e=>{
   try{await api("/api/homes/login",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);}
   catch(err){error.textContent=err.message;}
 });
+$("#forgot-home-button").addEventListener("click",()=>{$("#recover-home-code-error").textContent="";$("#recover-home-organizer-error").textContent="";$("#home-recovery-dialog").showModal();});
+$("#close-home-recovery").addEventListener("click",()=>$("#home-recovery-dialog").close());
+$("#home-recovery-dialog").addEventListener("click",e=>{if(e.target===$("#home-recovery-dialog"))$("#home-recovery-dialog").close();});
+$("#home-profile-reset-toggle").addEventListener("click",()=>{$("#home-profile-reset-error").textContent="";$("#home-profile-reset-form").classList.toggle("hidden");if(!$("#home-profile-reset-form").classList.contains("hidden"))$("#home-profile-reset-form [name=username]").focus();});
+$("#home-profile-reset-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#home-profile-reset-error");error.textContent="";
+  if(f.get("new_pin")!==f.get("confirm_pin")){error.textContent="The new profile PINs don’t match.";return;}
+  try{await api("/api/homes/profile-pin-reset",{method:"POST",body:JSON.stringify({member_id:f.get("member_id"),username:f.get("username"),home_pin:f.get("home_pin"),new_pin:f.get("new_pin")})});e.currentTarget.reset();e.currentTarget.classList.add("hidden");showToast("Profile PIN reset. Sign in with the new PIN.");}
+  catch(err){error.textContent=err.message;}
+});
+function showRecoveryCode(code){$("#recovery-code-value").value=code;$("#recovery-code-dialog").showModal();}
+$("#close-recovery-code").addEventListener("click",()=>$("#recovery-code-dialog").close());
+$("#done-recovery-code").addEventListener("click",()=>$("#recovery-code-dialog").close());
+$("#recovery-code-dialog").addEventListener("click",e=>{if(e.target===$("#recovery-code-dialog"))$("#recovery-code-dialog").close();});
+$("#copy-recovery-code").addEventListener("click",async()=>{const input=$("#recovery-code-value");try{await navigator.clipboard.writeText(input.value);showToast("Recovery code copied.");}catch{input.focus();input.select();document.execCommand("copy");showToast("Recovery code copied.");}});
+async function submitHomeRecovery(form, endpoint, errorSelector, payloadBuilder){
+  const f=new FormData(form);const error=$(errorSelector);error.textContent="";
+  if(f.get("pin")!==f.get("confirm_pin")){error.textContent="The new home PINs don’t match.";return;}
+  const button=$("[type=submit]",form);button.disabled=true;
+  try{const result=await api(endpoint,{method:"POST",body:JSON.stringify(payloadBuilder(f))});form.reset();$("#home-recovery-dialog").close();await renderHomeProfiles(result);showRecoveryCode(result.recovery_code);showToast("Home sign-in recovered. Save the new recovery code.");}
+  catch(err){error.textContent=err.message;}finally{button.disabled=false;}
+}
+$("#recover-home-code-form").addEventListener("submit",e=>{e.preventDefault();submitHomeRecovery(e.currentTarget,"/api/homes/recover/code","#recover-home-code-error",f=>({recovery_code:f.get("recovery_code"),username:f.get("username"),pin:f.get("pin")}));});
+$("#recover-home-organizer-form").addEventListener("submit",e=>{e.preventDefault();submitHomeRecovery(e.currentTarget,"/api/homes/recover/backup-organizer","#recover-home-organizer-error",f=>({household_name:f.get("household_name"),organizer_name:f.get("organizer_name"),organizer_pin:f.get("organizer_pin"),username:f.get("username"),pin:f.get("pin")}));});
 $("#home-credentials-button").addEventListener("click",()=>{$("#home-credentials-error").textContent="";$("#home-credentials-dialog").showModal();});
 $("#close-home-credentials").addEventListener("click",()=>$("#home-credentials-dialog").close());
 $("#home-credentials-dialog").addEventListener("click",e=>{if(e.target===$("#home-credentials-dialog"))$("#home-credentials-dialog").close();});
 $("#home-credentials-form").addEventListener("submit",async e=>{
   e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#home-credentials-error");error.textContent="";
   if(f.get("pin")!==f.get("confirm_pin")){error.textContent="The home PINs don’t match.";return;}
-  try{await api("/api/homes/credentials",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});$("#home-credentials-dialog").close();e.currentTarget.reset();showToast("Home sign-in saved. Keep the username and PIN safe.");}
+  try{await api("/api/homes/credentials",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});$("#home-credentials-dialog").close();e.currentTarget.reset();showToast("Home sign-in saved.");}
+  catch(err){error.textContent=err.message;}
+});
+async function loadRecoverySettings(){
+  const settings=await api("/api/homes/current/recovery-settings");
+  const status=$("#recovery-options-status");
+  const codeText=settings.recovery_code_configured?"A recovery code is saved. You can replace it below if it may have been shared or lost.":"No recovery code is saved yet. Create one and keep it somewhere private.";
+  const backupText=settings.recovery_organizer?` Backup organizer: ${settings.recovery_organizer.name}.`:" No backup organizer is set.";
+  status.textContent=codeText+backupText;
+  const form=$("#backup-organizer-form"), limited=$("#backup-organizer-limited"), select=$("#backup-organizer-form [name=member_id]");
+  form.classList.toggle("hidden",!settings.can_manage_backup_organizer);limited.classList.toggle("hidden",settings.can_manage_backup_organizer);
+  const candidates=settings.members.filter(item=>item.id!==state.me.id&&item.activated);
+  select.innerHTML=`<option value="">No backup organizer</option>`+candidates.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.role==="admin"?" · currently organizer":""}</option>`).join("");
+  if(settings.recovery_organizer)select.value=settings.recovery_organizer.id;
+  return settings;
+}
+$("#recovery-options-button").addEventListener("click",async()=>{
+  $("#recovery-options-status").textContent="Loading recovery settings…";$("#recovery-code-error").textContent="";$("#backup-organizer-error").textContent="";$("#recovery-options-dialog").showModal();
+  try{await loadRecoverySettings();}catch(error){$("#recovery-options-status").textContent=error.message;}
+});
+$("#close-recovery-options").addEventListener("click",()=>$("#recovery-options-dialog").close());
+$("#recovery-options-dialog").addEventListener("click",e=>{if(e.target===$("#recovery-options-dialog"))$("#recovery-options-dialog").close();});
+$("#recovery-code-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#recovery-code-error");error.textContent="";
+  try{const result=await api("/api/homes/current/recovery-code",{method:"POST",body:JSON.stringify({current_pin:f.get("current_pin")})});e.currentTarget.reset();$("#recovery-options-dialog").close();showRecoveryCode(result.recovery_code);}
+  catch(err){error.textContent=err.message;}
+});
+$("#backup-organizer-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#backup-organizer-error");error.textContent="";
+  try{const result=await api("/api/homes/current/recovery-organizer",{method:"PUT",body:JSON.stringify({current_pin:f.get("current_pin"),member_id:f.get("member_id")||null})});e.currentTarget.reset();await loadRecoverySettings();showToast(result.recovery_organizer?`${result.recovery_organizer.name} is now a backup organizer.`:"Backup organizer removed.");}
   catch(err){error.textContent=err.message;}
 });
 $("#toggle-create-home").addEventListener("click",()=>{$("#create-home-form").classList.toggle("hidden");$("#home-login-error").textContent="";});
@@ -87,7 +145,7 @@ $("#create-home-form").addEventListener("submit",async e=>{
   e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#create-home-error");error.textContent="";
   if(f.get("pin")!==f.get("confirm_home_pin")){error.textContent="The home PINs don’t match.";return;}
   if(f.get("organizer_pin")!==f.get("confirm_organizer_pin")){error.textContent="Your profile PINs don’t match.";return;}
-  try{await api("/api/homes",{method:"POST",body:JSON.stringify(Object.fromEntries(f))});const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);showToast("Home created. Sign in with your organizer profile PIN.");}
+  try{const created=await api("/api/homes",{method:"POST",body:JSON.stringify(Object.fromEntries(f))});await renderHomeProfiles(created);showRecoveryCode(created.recovery_code);showToast("Home created. Save your recovery code.");}
   catch(err){error.textContent=err.message;}
 });
 $("#home-profile-login").addEventListener("submit",async e=>{
@@ -101,7 +159,7 @@ $("#change-pin-dialog").addEventListener("click",e=>{if(e.target===$("#change-pi
 $("#change-pin-form").addEventListener("submit",async e=>{
   e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#change-pin-error");error.textContent="";
   if(f.get("new_pin")!==f.get("confirm_pin")){error.textContent="The new PINs don’t match.";return;}
-  try{await api("/api/me/pin",{method:"POST",body:JSON.stringify({current_pin:f.get("current_pin"),new_pin:f.get("new_pin")})});$("#change-pin-dialog").close();e.currentTarget.reset();showToast("Your profile PIN has been changed.");}
+  try{await api("/api/me/pin",{method:"POST",body:JSON.stringify({current_pin:f.get("current_pin"),new_pin:f.get("new_pin")})});$("#change-pin-dialog").close();e.currentTarget.reset();await api("/api/logout",{method:"POST"});state.me=null;try{await renderHomeProfiles(await api("/api/homes/current/profiles"));showScreen("home-screen");}catch{await showLogin();}showToast("Your profile PIN changed. Sign in again with the new PIN.");}
   catch(err){error.textContent=err.message;}
 });
 $("#activation-form").addEventListener("submit", async e => {
@@ -156,6 +214,7 @@ function populateMembers() {
   $("#assignee-select").innerHTML = state.members.map(m => `<option value="${escapeHtml(m.id)}" ${m.id === state.me.id ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
   $("#member-filter").innerHTML = `<option value="all">Everyone</option>` + state.members.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join("");
   $("#manage-members").classList.toggle("hidden", state.me.role !== "admin");
+  $("#recovery-options-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   renderMemberNotices();
 }
@@ -296,7 +355,7 @@ $("#profile-signout").addEventListener("click",async()=>{
   catch(error){showScreen("home-screen");showToast(error.message);}
 });
 $("#sign-out-home").addEventListener("click",async()=>{
-  try{await api("/api/homes/logout",{method:"POST"});$("#home-profiles-wrap").classList.add("hidden");$("#home-login-form").classList.remove("hidden");$("#toggle-create-home").classList.remove("hidden");$("#create-home-form").classList.add("hidden");$("#home-login-form").reset();$("#home-login-error").textContent="";showScreen("home-screen");}
+  try{await api("/api/homes/logout",{method:"POST"});$("#home-profiles-wrap").classList.add("hidden");$("#home-login-form").classList.remove("hidden");$("#forgot-home-button").classList.remove("hidden");$("#toggle-create-home").classList.remove("hidden");$("#create-home-form").classList.add("hidden");$("#home-login-form").reset();$("#home-login-error").textContent="";showScreen("home-screen");}
   catch(error){showToast(error.message);}
 });
 $("#task-form").addEventListener("submit", async e => {
