@@ -27,7 +27,7 @@
           <p id="home-login-error" class="field-error" aria-live="polite"></p>
           <button class="button button-primary button-wide" type="submit">Continue to profiles <span>→</span></button>
         </form>
-        <div id="home-profiles-wrap" class="home-profiles-wrap hidden"><div class="form-section-label">Choose your profile</div><div id="home-profile-list" class="profile-list"></div><form id="home-profile-login" class="hidden"><input type="hidden" name="member_id"><label id="home-profile-pin-label">Profile PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" placeholder="4–6 digits"></label><p id="home-profile-error" class="field-error" aria-live="polite"></p><button class="button button-primary button-wide" type="submit">Open my home <span>→</span></button></form></div>
+        <div id="home-profiles-wrap" class="home-profiles-wrap hidden"><div class="form-section-label">Choose your profile</div><div id="home-profile-list" class="profile-list"></div><form id="home-profile-login" class="hidden"><input type="hidden" name="member_id"><label id="home-profile-pin-label">Profile PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" placeholder="4–6 digits"></label><p id="home-profile-error" class="field-error" aria-live="polite"></p><button class="button button-primary button-wide" type="submit">Open my home <span>→</span></button><button id="sign-out-home" class="button button-secondary button-wide" type="button">Sign out of this home</button></form></div>
         <button id="toggle-create-home" class="text-button home-create-toggle" type="button">＋ Create a new home</button>
         <form id="create-home-form" class="hidden">
           <div class="form-section-label">Create your home space</div>
@@ -42,7 +42,6 @@
           <p id="create-home-error" class="field-error" aria-live="polite"></p>
           <button class="button button-primary button-wide" type="submit">Create home <span>→</span></button>
         </form>
-        <button id="existing-home-login" class="text-button home-legacy-link" type="button">Sign in to the existing household</button>
       </div>
     </section>
 
@@ -108,7 +107,7 @@
           <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span id="theme-icon">☾</span></button>
           <button id="home-credentials-button" class="small-action hidden" type="button">Set home sign-in</button>
           <button id="change-pin-button" class="small-action" type="button">Change PIN</button>
-          <button id="account-button" class="account-button" type="button"><span id="account-avatar" class="avatar">S</span><span class="account-name" id="account-name">Sam</span><span class="chevron">⌄</span></button>
+          <div class="account-menu-wrap"><button id="account-button" class="account-button" type="button" aria-expanded="false" aria-haspopup="true"><span id="account-avatar" class="avatar">S</span><span class="account-name" id="account-name">Sam</span><span class="chevron">⌄</span></button><div id="account-menu" class="account-menu hidden"><button id="profile-signout" class="account-menu-item" type="button">Sign out</button></div></div>
         </div>
       </header>
       <div class="page-wrap">

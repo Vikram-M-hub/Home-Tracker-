@@ -31,7 +31,7 @@ async function start() {
   const inviteToken=new URLSearchParams(location.search).get("invite");
   if(inviteToken){
     try{const invitation=await api(`/api/invitations/${encodeURIComponent(inviteToken)}`);$("#invite-token").value=inviteToken;$("#invite-member-name").textContent=invitation.name;showScreen("pin-setup-screen");return;}
-    catch(error){await showLogin().catch(()=>showScreen("login-screen"));showToast(error.message);return;}
+    catch(error){showScreen("home-screen");showToast(error.message);return;}
   }
   if (previewMode) {
     const people = [
@@ -54,7 +54,8 @@ async function start() {
   catch { showScreen("home-screen"); }
 }
 async function renderHomeProfiles(data) {
-  $("#home-profiles-wrap").classList.remove("hidden"); $("#home-login-form").classList.add("hidden"); $("#toggle-create-home").classList.add("hidden"); $("#existing-home-login").classList.add("hidden"); $("#create-home-form").classList.add("hidden");
+  $("#home-profiles-wrap").classList.remove("hidden"); $("#home-login-form").classList.add("hidden"); $("#toggle-create-home").classList.add("hidden"); $("#create-home-form").classList.add("hidden");
+  $("#home-profile-login").classList.add("hidden"); $("#home-profile-login").reset();
   $("#home-profile-list").innerHTML=data.members.map(profileCard).join("");
   $$(".profile-option",$("#home-profile-list")).forEach(button=>button.addEventListener("click",()=>{
     const selected=data.members.find(member=>member.id===button.dataset.member);
@@ -91,7 +92,6 @@ $("#home-profile-login").addEventListener("submit",async e=>{
   try{await api("/api/login",{method:"POST",body:JSON.stringify({member_id:f.get("member_id"),pin:f.get("pin")})});openDashboard(await api("/api/me"));}
   catch(err){error.textContent=err.message;$("#home-profile-login [name=pin]").value="";}
 });
-$("#existing-home-login").addEventListener("click",()=>showLogin().catch(err=>showToast(err.message)));
 $("#change-pin-button").addEventListener("click",()=>{$("#change-pin-error").textContent="";$("#change-pin-dialog").showModal();});
 $("#close-change-pin").addEventListener("click",()=>$("#change-pin-dialog").close());
 $("#change-pin-dialog").addEventListener("click",e=>{if(e.target===$("#change-pin-dialog"))$("#change-pin-dialog").close();});
@@ -270,7 +270,20 @@ $("#login-form").addEventListener("submit", async e => {
   try { await api("/api/login", {method:"POST",body:JSON.stringify({member_id:$("[name=member_id]",form).value,pin:$("[name=pin]",form).value})}); openDashboard(await api("/api/me")); }
   catch(error) { err.textContent = error.message; $("#login-pin").value = ""; $("#login-pin").focus(); }
 });
-$("#account-button").addEventListener("click", async () => { if(previewMode){showToast("You’re viewing a sample family space");return;} await api("/api/logout", {method:"POST"}); await api("/api/homes/logout",{method:"POST"}).catch(()=>{}); state.me = null; showScreen("home-screen"); });
+function closeAccountMenu(){$("#account-menu").classList.add("hidden");$("#account-button").setAttribute("aria-expanded","false");}
+$("#account-button").addEventListener("click",()=>{const menu=$("#account-menu");const opening=menu.classList.contains("hidden");menu.classList.toggle("hidden",!opening);$("#account-button").setAttribute("aria-expanded",String(opening));});
+document.addEventListener("click",e=>{if(!e.target.closest(".account-menu-wrap"))closeAccountMenu();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeAccountMenu();});
+$("#profile-signout").addEventListener("click",async()=>{
+  closeAccountMenu();
+  if(previewMode){showToast("You’re viewing a sample family space");return;}
+  try{await api("/api/logout",{method:"POST"});state.me=null;const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);showScreen("home-screen");}
+  catch(error){showScreen("home-screen");showToast(error.message);}
+});
+$("#sign-out-home").addEventListener("click",async()=>{
+  try{await api("/api/homes/logout",{method:"POST"});$("#home-profiles-wrap").classList.add("hidden");$("#home-login-form").classList.remove("hidden");$("#toggle-create-home").classList.remove("hidden");$("#create-home-form").classList.add("hidden");$("#home-login-form").reset();$("#home-login-error").textContent="";showScreen("home-screen");}
+  catch(error){showToast(error.message);}
+});
 $("#task-form").addEventListener("submit", async e => {
   e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note")};
   try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; await loadTasks(); showToast(result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
