@@ -225,6 +225,11 @@ class PinChangeInput(BaseModel):
     new_pin: str = Field(pattern=r"^\d{4,6}$")
 
 
+class HomeCredentialsInput(BaseModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9._-]+$")
+    pin: str = Field(pattern=r"^\d{4,6}$")
+
+
 class LoginInput(BaseModel):
     member_id: str
     pin: str = Field(pattern=r"^\d{4,6}$")
@@ -333,6 +338,20 @@ def logout_home(response: Response) -> dict[str, bool]:
     response.delete_cookie("family_home", httponly=True, secure=COOKIE_SECURE, samesite="lax")
     response.delete_cookie("family_session", httponly=True, secure=COOKIE_SECURE, samesite="lax")
     return {"ok": True}
+
+
+@app.post("/api/homes/credentials")
+def set_home_credentials(payload: HomeCredentialsInput, request: Request) -> dict[str, Any]:
+    member, data = current_member(request)
+    if member["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only the household organizer can change the home sign-in")
+    username = payload.username.strip().lower()
+    if any((h.get("household") or {}).get("username", "").lower() == username and (h.get("household") or {}).get("id") != data["household"]["id"] for h in all_homes()):
+        raise HTTPException(status_code=409, detail="That home username is already taken. Choose another one.")
+    data["household"]["username"] = username
+    data["household"]["username_pin"] = pin_hash(payload.pin)
+    save_data(data)
+    return {"household": public_household(data["household"])}
 
 
 @app.post("/api/setup")

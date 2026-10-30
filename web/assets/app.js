@@ -69,6 +69,15 @@ $("#home-login-form").addEventListener("submit",async e=>{
   try{await api("/api/homes/login",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);}
   catch(err){error.textContent=err.message;}
 });
+$("#home-credentials-button").addEventListener("click",()=>{$("#home-credentials-error").textContent="";$("#home-credentials-dialog").showModal();});
+$("#close-home-credentials").addEventListener("click",()=>$("#home-credentials-dialog").close());
+$("#home-credentials-dialog").addEventListener("click",e=>{if(e.target===$("#home-credentials-dialog"))$("#home-credentials-dialog").close();});
+$("#home-credentials-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#home-credentials-error");error.textContent="";
+  if(f.get("pin")!==f.get("confirm_pin")){error.textContent="The home PINs don’t match.";return;}
+  try{await api("/api/homes/credentials",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});$("#home-credentials-dialog").close();e.currentTarget.reset();showToast("Home sign-in saved. Keep the username and PIN safe.");}
+  catch(err){error.textContent=err.message;}
+});
 $("#toggle-create-home").addEventListener("click",()=>{$("#create-home-form").classList.toggle("hidden");$("#home-login-error").textContent="";});
 $("#create-home-form").addEventListener("submit",async e=>{
   e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#create-home-error");error.textContent="";
@@ -143,6 +152,7 @@ function populateMembers() {
   $("#assignee-select").innerHTML = state.members.map(m => `<option value="${escapeHtml(m.id)}" ${m.id === state.me.id ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
   $("#member-filter").innerHTML = `<option value="all">Everyone</option>` + state.members.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`).join("");
   $("#manage-members").classList.toggle("hidden", state.me.role !== "admin");
+  $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin");
   renderMemberNotices();
 }
 function renderMemberNotices(){
