@@ -102,7 +102,7 @@ async function submitHomeRecovery(form, endpoint, errorSelector, payloadBuilder)
 }
 $("#recover-home-code-form").addEventListener("submit",e=>{e.preventDefault();submitHomeRecovery(e.currentTarget,"/api/homes/recover/code","#recover-home-code-error",f=>({recovery_code:f.get("recovery_code"),username:f.get("username"),pin:f.get("pin")}));});
 $("#recover-home-organizer-form").addEventListener("submit",e=>{e.preventDefault();submitHomeRecovery(e.currentTarget,"/api/homes/recover/backup-organizer","#recover-home-organizer-error",f=>({household_name:f.get("household_name"),organizer_name:f.get("organizer_name"),organizer_pin:f.get("organizer_pin"),username:f.get("username"),pin:f.get("pin")}));});
-$("#home-credentials-button").addEventListener("click",()=>{$("#home-credentials-error").textContent="";$("#home-credentials-dialog").showModal();});
+$("#home-credentials-button").addEventListener("click",()=>{closeAccountMenu();$("#home-credentials-error").textContent="";$("#home-credentials-dialog").showModal();});
 $("#close-home-credentials").addEventListener("click",()=>$("#home-credentials-dialog").close());
 $("#home-credentials-dialog").addEventListener("click",e=>{if(e.target===$("#home-credentials-dialog"))$("#home-credentials-dialog").close();});
 $("#home-credentials-form").addEventListener("submit",async e=>{
@@ -125,6 +125,7 @@ async function loadRecoverySettings(){
   return settings;
 }
 $("#recovery-options-button").addEventListener("click",async()=>{
+  closeAccountMenu();
   $("#recovery-options-status").textContent="Loading recovery settings…";$("#recovery-code-error").textContent="";$("#backup-organizer-error").textContent="";$("#recovery-options-dialog").showModal();
   try{await loadRecoverySettings();}catch(error){$("#recovery-options-status").textContent=error.message;}
 });
@@ -153,7 +154,7 @@ $("#home-profile-login").addEventListener("submit",async e=>{
   try{await api("/api/login",{method:"POST",body:JSON.stringify({member_id:f.get("member_id"),pin:f.get("pin")})});openDashboard(await api("/api/me"));}
   catch(err){error.textContent=err.message;$("#home-profile-login [name=pin]").value="";}
 });
-$("#change-pin-button").addEventListener("click",()=>{$("#change-pin-error").textContent="";$("#change-pin-dialog").showModal();});
+$("#change-pin-button").addEventListener("click",()=>{closeAccountMenu();$("#change-pin-error").textContent="";$("#change-pin-dialog").showModal();});
 $("#close-change-pin").addEventListener("click",()=>$("#change-pin-dialog").close());
 $("#change-pin-dialog").addEventListener("click",e=>{if(e.target===$("#change-pin-dialog"))$("#change-pin-dialog").close();});
 $("#change-pin-form").addEventListener("submit",async e=>{
