@@ -699,23 +699,6 @@ def recovery_settings(request: Request) -> dict[str, Any]:
     }
 
 
-@app.get("/api/homes/current/export")
-def export_home_data(request: Request) -> Response:
-    member, data = current_member(request)
-    if member.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only a household organizer can export home data")
-    export = {
-        "format": "together-household-export-v1",
-        "exported_at": now_iso(),
-        "household": public_household(data["household"]),
-        "members": [{"id": item["id"], "name": item["name"], "role": item["role"], "activated": bool(item.get("pin")), "created_at": item.get("created_at")} for item in data["members"]],
-        "tasks": data.get("tasks", []),
-        "recurring_series": data.get("recurring_series", []),
-    }
-    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", data["household"].get("name", "home")).strip("-._") or "home"
-    return Response(content=json.dumps(export, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{filename}-together-export.json"'})
-
-
 @app.post("/api/homes/current/recovery-code")
 def replace_recovery_code(payload: RecoveryCodeSetupInput, request: Request) -> dict[str, str]:
     member, data = current_member(request)

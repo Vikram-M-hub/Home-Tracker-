@@ -21,10 +21,9 @@ Open http://127.0.0.1:8000 and create a household. Local data is stored in `.dat
 - Guided setup, private copyable profile setup links, self-service profile PIN changes, home recovery, and profile or household deletion.
 - Personal task list and shared family board, assignees, due dates, priorities, notes, and progress updates. Completing another member’s task assigns it to the person who completed it; reopening returns it to its original assignee.
 - In-page task details. The creator can edit task details or delete the task. Recurring tasks support daily, selected-weekday, monthly, and yearly schedules, pause/resume, and editing one or all future occurrences.
-- Completion history, a collapsed completed-task section, and a nested archive view for completed tasks older than 30 days. Archived tasks remain in the household record and export.
+- Completion history, a collapsed completed-task section, and a nested archive view for completed tasks older than 30 days.
 - Responsive blue and white interface, saved dark mode, large mobile controls, and bottom navigation.
 - Self-help guide and public privacy and data-deletion pages at `/privacy` and `/data-deletion`.
-- Organizer-only JSON export of household data, excluding PINs and credential secrets.
 
 ## Free deployment and storage
 
@@ -34,7 +33,7 @@ The app is prepared for a free Render web service and a free Neon Postgres datab
 2. In Render, create a Blueprint from this repository and select the free instance.
 3. Set `PUBLIC_URL` to the Render URL so private profile setup links use the correct address.
 
-Postgres stores each household as a separate versioned JSONB record. Existing data in the former `family_state` record is copied once into household records; the old row is retained as a migration backup. Version checks reject conflicting saves instead of silently overwriting a household's newer data. Organizers can download a manual JSON backup from the profile menu. Keep that export private; it contains family names and task information.
+Postgres stores each household as a separate versioned JSONB record. Existing data in the former `family_state` record is copied once into household records; the old row is retained as a migration backup. Version checks reject conflicting saves instead of silently overwriting a household's newer data.
 
 Do not set `FIRESTORE_COLLECTION` when using Neon. The original household remains in the website's database. The separate Flutter app has its own storage path and is not changed by this website update.
 

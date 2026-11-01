@@ -237,7 +237,6 @@ function populateMembers() {
   $("#recovery-options-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#delete-home-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
-  $("#export-home-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#delete-profile-button").classList.toggle("hidden", previewMode);
   $("#delete-member-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   renderMemberNotices();
@@ -474,11 +473,6 @@ function closeAccountMenu(){$("#account-menu").classList.add("hidden");$("#accou
 $("#help-menu-button").addEventListener("click",()=>{closeAccountMenu();$("#help-dialog").showModal();});
 $("#close-help").addEventListener("click",()=>$("#help-dialog").close());
 $("#help-dialog").addEventListener("click",e=>{if(e.target===$("#help-dialog"))$("#help-dialog").close();});
-$("#export-home-button").addEventListener("click",async()=>{
-  closeAccountMenu();
-  try{const response=await fetch("/api/homes/current/export",{credentials:"same-origin"});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"Could not download household data");}const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="together-home-export.json";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);showToast("Home data downloaded. Keep the file somewhere private.");}
-  catch(error){showToast(error.message);}
-});
 function updateDeleteProfileTransfer(){
   const targetId=$("#delete-profile-target").value;
   const transfer=state.isPrimaryOrganizer&&targetId===state.me.id;
