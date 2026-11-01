@@ -1,6 +1,6 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
-const state = {me: null, members: [], tasks: [], view: "mine", myFilter: "all", mySearch: "", familyFilter: "all", memberFilter: "all", familySearch: "", selectedProfile: null};
+const state = {me: null, members: [], tasks: [], household: null, isPrimaryOrganizer: false, primaryOrganizerId: null, view: "mine", myFilter: "all", mySearch: "", familyFilter: "all", memberFilter: "all", familySearch: "", selectedProfile: null, createMode: "once"};
 const previewMode = new URLSearchParams(location.search).has("preview");
 const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const initials = (name) => name.split(/\s+/).slice(0, 2).map(x => x[0]).join("").toUpperCase();
@@ -64,6 +64,9 @@ async function renderHomeProfiles(data) {
   const resetSelect=$("#home-profile-reset-form [name=member_id]");
   resetSelect.innerHTML=data.members.filter(member=>member.activated).map(member=>`<option value="${escapeHtml(member.id)}">${escapeHtml(member.name)}</option>`).join("");
   $("#home-profile-list").innerHTML=data.members.map(profileCard).join("");
+  const organizers=data.members.filter(member=>member.role==="admin"&&member.activated);
+  $("#home-add-profile").classList.toggle("hidden",!organizers.length);
+  $("#home-add-member-form [name=organizer_id]").innerHTML=organizers.map(member=>`<option value="${escapeHtml(member.id)}">${escapeHtml(member.name)}</option>`).join("");
   $$(".profile-option",$("#home-profile-list")).forEach(button=>button.addEventListener("click",()=>{
     const selected=data.members.find(member=>member.id===button.dataset.member);
     if(!selected.activated){$("#home-profile-error").textContent="This profile is waiting for its private setup link from the organizer.";return;}
@@ -77,6 +80,21 @@ $("#home-login-form").addEventListener("submit",async e=>{
   e.preventDefault();const f=new FormData(e.currentTarget);const error=$("#home-login-error");error.textContent="";
   try{await api("/api/homes/login",{method:"POST",body:JSON.stringify({username:f.get("username"),pin:f.get("pin")})});const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);}
   catch(err){error.textContent=err.message;}
+});
+$("#home-add-profile").addEventListener("click",()=>{
+  $("#home-add-member-error").textContent="";$("#home-add-member-form").reset();$("#home-add-member-dialog").showModal();
+});
+$("#close-home-add-member").addEventListener("click",()=>$("#home-add-member-dialog").close());
+$("#home-add-member-dialog").addEventListener("click",e=>{if(e.target===$("#home-add-member-dialog"))$("#home-add-member-dialog").close();});
+$("#home-add-member-form").addEventListener("submit",async e=>{
+  e.preventDefault();const form=e.currentTarget,f=new FormData(form),button=$("[type=submit]",form),error=$("#home-add-member-error");
+  error.textContent="";button.disabled=true;
+  try{
+    const result=await api("/api/homes/current/profiles/members",{method:"POST",body:JSON.stringify({organizer_id:f.get("organizer_id"),pin:f.get("pin"),name:f.get("name"),email:f.get("email")})});
+    form.reset();$("#home-add-member-dialog").close();
+    await renderHomeProfiles(await api("/api/homes/current/profiles"));
+    await openInviteLink(result.invite_url,result.member.name,result.invitation_sent);
+  }catch(err){error.textContent=err.message;}finally{button.disabled=false;}
 });
 $("#forgot-home-button").addEventListener("click",()=>{$("#recover-home-code-error").textContent="";$("#recover-home-organizer-error").textContent="";$("#home-recovery-dialog").showModal();});
 $("#close-home-recovery").addEventListener("click",()=>$("#home-recovery-dialog").close());
@@ -196,7 +214,7 @@ async function showLogin() {
   showScreen("login-screen");
 }
 function openDashboard(data) {
-  state.me = data.member; state.members = data.members || [];
+  state.me = data.member; state.members = data.members || []; state.household = data.household || null; state.isPrimaryOrganizer = Boolean(data.is_primary_organizer);state.primaryOrganizerId=data.primary_organizer_id||null;
   state.mySearch = ""; state.familySearch = ""; $("#my-task-search").value = ""; $("#family-task-search").value = "";
   $("#preview-badge").classList.toggle("hidden", !previewMode);
   if (data.household) $("#family-title").textContent = `${data.household.name}’s family board`;
@@ -217,6 +235,9 @@ function populateMembers() {
   $("#manage-members").classList.toggle("hidden", state.me.role !== "admin");
   $("#recovery-options-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
+  $("#delete-home-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
+  $("#delete-profile-button").classList.toggle("hidden", previewMode);
+  $("#delete-member-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   renderMemberNotices();
 }
 function renderMemberNotices(){
@@ -270,21 +291,50 @@ function renderTasks() {
   $("#hero-progress-text").textContent = `${done} of ${mine.length} ${mine.length === 1 ? "task" : "tasks"} done`;
   $("#hero-title").textContent = mine.length && done === mine.length ? "You did it!" : open === 0 ? "A fresh start." : open === 1 ? "One thing at a time." : "You’ve got this.";
   $("#hero-copy").textContent = mine.length && done === mine.length ? "Everything on your list is taken care of." : open ? `${open} ${open === 1 ? "task is" : "tasks are"} waiting for you.` : "Small things add up. You’ve got this.";
-  const myTasks = mine.filter(t => (state.myFilter === "all" || (state.myFilter === "active" ? t.status !== "done" : t.status === state.myFilter)) && matchesTaskSearch(t, state.mySearch));
+  const {weekStart, weekEnd} = currentWeekRange();
+  const myTasks = mine.filter(t => {
+    const matchesFilter = state.myFilter === "all" || (state.myFilter === "due_week"
+      ? Boolean(t.due_date && t.due_date >= weekStart && t.due_date <= weekEnd)
+      : t.status === state.myFilter);
+    return matchesFilter && matchesTaskSearch(t, state.mySearch);
+  });
+  $("#my-task-summary").textContent = `${myTasks.length} ${myTasks.length === 1 ? "task" : "tasks"}`;
+  $$("[data-my-filter]").forEach(button => button.classList.toggle("selected", button.dataset.myFilter === state.myFilter));
   $("#my-task-list").innerHTML = myTasks.map(t => taskCard(t)).join("");
   const myNoResults = Boolean(state.mySearch) && myTasks.length === 0;
   $("#my-empty").classList.toggle("hidden", myTasks.length !== 0 || myNoResults);
   $("#my-no-results").classList.toggle("hidden", !myNoResults);
-  const filtered = state.tasks.filter(t => (state.familyFilter === "all" || t.status === state.familyFilter) && (state.memberFilter === "all" || t.assignee_id === state.memberFilter) && matchesTaskSearch(t, state.familySearch));
+  if(myTasks.length===0&&!myNoResults){
+    const emptyTitles={due_week:"Nothing due this week",todo:"No tasks to do",in_progress:"Nothing in progress",done:"No completed tasks"};
+    $("#my-empty h3").textContent=emptyTitles[state.myFilter]||"All clear for now";
+    $("#my-empty p").textContent=state.myFilter==="due_week"?"Tasks due Sunday through Saturday will appear here.":"You don’t have any tasks here. Enjoy the breathing room.";
+  }
+  const filtered = state.tasks.filter(t => {
+    const matchesFilter=state.familyFilter==="all"||(state.familyFilter==="due_week"?Boolean(t.due_date&&t.due_date>=weekStart&&t.due_date<=weekEnd):t.status===state.familyFilter);
+    return matchesFilter&&(state.memberFilter==="all"||t.assignee_id===state.memberFilter)&&matchesTaskSearch(t,state.familySearch);
+  });
   $("#family-task-list").innerHTML = filtered.map(t => taskCard(t, true)).join("");
-  const familyNoResults = Boolean(state.familySearch) && filtered.length === 0;
-  $("#family-empty").classList.toggle("hidden", filtered.length !== 0 || familyNoResults);
+  const familyEmpty=state.tasks.length===0&&state.familyFilter==="all"&&state.memberFilter==="all"&&!state.familySearch;
+  const familyNoResults = filtered.length===0&&!familyEmpty;
+  $("#family-empty").classList.toggle("hidden", !familyEmpty);
   $("#family-no-results").classList.toggle("hidden", !familyNoResults);
+  if(familyNoResults){
+    const label=state.familyFilter==="due_week"?"No tasks due this week":state.familyFilter==="todo"?"No tasks to do":state.familyFilter==="in_progress"?"Nothing in progress":state.familyFilter==="done"?"No completed tasks":"No matching tasks";
+    $("#family-no-results-title").textContent=label;
+    $("#family-no-results-copy").textContent=state.familySearch?"Try a different word or clear your search.":"Try another task filter or show all tasks.";
+    $("#clear-family-search").textContent=state.familySearch?"Clear search":"Show all tasks";
+  }
   const allDone = state.tasks.filter(t => t.status === "done").length;
   $("#family-progress-number").textContent = `${state.tasks.length ? Math.round(allDone / state.tasks.length * 100) : 0}%`;
   $("#family-stats").innerHTML = [{key:"todo",label:"To do",icon:"○"},{key:"in_progress",label:"In progress",icon:"◷"},{key:"done",label:"Done",icon:"✓"}].map(s => `<div class="stat-card stat-${s.key}"><span class="stat-icon">${s.icon}</span><span class="stat-value">${state.tasks.filter(t => t.status === s.key).length}</span><span class="stat-label">${s.label}</span></div>`).join("");
   $$(".task-check").forEach(button => button.addEventListener("click", () => updateStatus(button.dataset.task, button.dataset.next)));
   $$("[data-task-detail]").forEach(button => button.addEventListener("click", () => openTaskDetails(button.dataset.taskDetail)));
+}
+function currentWeekRange(){
+  const start=new Date();start.setHours(0,0,0,0);start.setDate(start.getDate()-start.getDay());
+  const end=new Date(start);end.setDate(start.getDate()+6);
+  const key=value=>`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;
+  return {weekStart:key(start),weekEnd:key(end)};
 }
 function showTaskDetailMode(editing){
   $("#task-details-view").classList.toggle("hidden",editing);
@@ -300,12 +350,16 @@ function openTaskDetails(taskId){
   $("#detail-task-assignee").textContent=task.assignee?.name||state.members.find(m=>m.id===task.assignee_id)?.name||"Unassigned";
   $("#detail-task-due").textContent=task.due_date?new Intl.DateTimeFormat(undefined,{year:"numeric",month:"long",day:"numeric"}).format(new Date(`${task.due_date}T12:00:00`)):"No due date";
   $("#detail-task-priority").textContent={low:"Whenever",normal:"Normal",high:"Important"}[task.priority]||"Normal";
+  const cadenceLabels={daily:"Every day",weekly:"Every week",monthly:"Every month",yearly:"Every year"};
+  $("#detail-task-recurrence-wrap").classList.toggle("hidden",!task.recurrence);
+  $("#detail-task-recurrence").textContent=cadenceLabels[task.recurrence]||"";
   $("#detail-task-status").textContent={todo:"To do",in_progress:"In progress",done:"Done"}[task.status]||task.status;
   $("#detail-task-note").textContent=task.note||"No description added.";
   $("#detail-task-creator").textContent=task.creator?.name||state.members.find(m=>m.id===task.created_by)?.name||"Unknown";
   $("#detail-task-created").textContent=task.created_at?new Intl.DateTimeFormat(undefined,{year:"numeric",month:"long",day:"numeric"}).format(new Date(task.created_at)):"—";
   const isCreator=task.created_by===state.me.id;
   $("#task-owner-actions").classList.toggle("hidden",!isCreator);
+  $("#stop-recurring-button").classList.toggle("hidden",!task.recurrence_id);
   $("#edit-task-title").value=task.title;
   const editAssignee=task.status==="done"?(task.original_assignee_id||task.assignee_id):task.assignee_id;
   $("#edit-task-assignee-label").textContent=task.status==="done"?"Assigned to when reopened":"Assigned to";
@@ -330,7 +384,27 @@ function setView(view) {
   state.view = view; $("#my-home").classList.toggle("hidden", view !== "mine"); $("#family-home").classList.toggle("hidden", view !== "family");
   $$(".view-tab,.mobile-nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
 }
-function openTaskDialog() { $("#task-dialog").showModal(); $("#task-form [name=title]").focus(); }
+function closeAddTaskMenu(){const menu=$("#add-task-menu");menu.classList.add("hidden");$$(".add-task-trigger").forEach(button=>button.setAttribute("aria-expanded","false"));}
+function toggleAddTaskMenu(trigger){
+  const menu=$("#add-task-menu");
+  if(!menu.classList.contains("hidden")){closeAddTaskMenu();return;}
+  const rect=trigger.getBoundingClientRect();menu.classList.remove("hidden");
+  const width=menu.offsetWidth,height=menu.offsetHeight;
+  const left=Math.min(Math.max(12,rect.right-width),window.innerWidth-width-12);
+  const top=trigger.id==="mobile-add"?Math.max(12,rect.top-height-12):Math.min(rect.bottom+10,window.innerHeight-height-12);
+  menu.style.left=left+"px";menu.style.top=top+"px";
+  $$(".add-task-trigger").forEach(button=>button.setAttribute("aria-expanded",String(button===trigger)));
+}
+function showTaskDialog(mode="once"){
+  closeAddTaskMenu();state.createMode=mode;
+  const recurring=mode==="recurring";
+  $("#task-dialog-title").textContent=recurring?"Create a recurring task":"Create a new task";
+  $("#recurrence-field").classList.toggle("hidden",!recurring);
+  $("#task-form [name=due_date]").required=recurring;
+  $("#task-form [name=recurrence]").disabled=!recurring;
+  $("#task-dialog").showModal();$("#task-form [name=title]").focus();
+}
+function openTaskDialog(){showTaskDialog("once");}
 
 $("#add-profile").addEventListener("click", () => renderSetupProfiles());
 $("#setup-form").addEventListener("submit", async e => {
@@ -346,6 +420,33 @@ $("#login-form").addEventListener("submit", async e => {
   catch(error) { err.textContent = error.message; $("#login-pin").value = ""; $("#login-pin").focus(); }
 });
 function closeAccountMenu(){$("#account-menu").classList.add("hidden");$("#account-button").setAttribute("aria-expanded","false");}
+function updateDeleteProfileTransfer(){
+  const targetId=$("#delete-profile-target").value;
+  const transfer=state.isPrimaryOrganizer&&targetId===state.me.id;
+  const field=$("#transfer-organizer-field"),select=$("#transfer-organizer-select");
+  field.classList.toggle("hidden",!transfer);select.required=transfer;
+  select.innerHTML=state.members.filter(m=>m.id!==targetId&&m.activated).map(m=>'<option value="'+escapeHtml(m.id)+'">'+escapeHtml(m.name)+'</option>').join("");
+}
+function openDeleteProfileDialog(){
+  closeAccountMenu();
+  if(previewMode){showToast("Profile deletion is available in your family home");return;}
+  const target=$("#delete-profile-target");
+  $("#delete-target-field").classList.add("hidden");
+  target.innerHTML='<option value="'+escapeHtml(state.me.id)+'">'+escapeHtml(state.me.name)+" · you</option>";
+  $("#delete-profile-error").textContent="";$("#delete-profile-form").reset();target.value=state.me.id;
+  updateDeleteProfileTransfer();$("#delete-profile-dialog").showModal();
+}
+function openDeleteMemberDialog(){
+  closeAccountMenu();
+  if(previewMode)return;
+  const others=state.members.filter(m=>m.id!==state.me.id&&m.id!==state.primaryOrganizerId);
+  if(!others.length){showToast("There are no other profiles available to delete");return;}
+  const target=$("#delete-profile-target");
+  $("#delete-target-field").classList.remove("hidden");
+  target.innerHTML=others.map(m=>'<option value="'+escapeHtml(m.id)+'">'+escapeHtml(m.name)+'</option>').join("");
+  $("#delete-profile-error").textContent="";$("#delete-profile-form").reset();target.value=others[0].id;
+  updateDeleteProfileTransfer();$("#delete-profile-dialog").showModal();
+}
 $("#account-button").addEventListener("click",()=>{const menu=$("#account-menu");const opening=menu.classList.contains("hidden");menu.classList.toggle("hidden",!opening);$("#account-button").setAttribute("aria-expanded",String(opening));});
 document.addEventListener("click",e=>{if(!e.target.closest(".account-menu-wrap"))closeAccountMenu();});
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeAccountMenu();});
@@ -355,13 +456,43 @@ $("#profile-signout").addEventListener("click",async()=>{
   try{await api("/api/logout",{method:"POST"});state.me=null;const data=await api("/api/homes/current/profiles");await renderHomeProfiles(data);showScreen("home-screen");}
   catch(error){showScreen("home-screen");showToast(error.message);}
 });
+$("#delete-profile-button").addEventListener("click",openDeleteProfileDialog);
+$("#delete-member-button").addEventListener("click",openDeleteMemberDialog);
+$("#close-delete-profile").addEventListener("click",()=>$("#delete-profile-dialog").close());
+$("#delete-profile-dialog").addEventListener("click",e=>{if(e.target===$("#delete-profile-dialog"))$("#delete-profile-dialog").close();});
+$("#delete-profile-target").addEventListener("change",updateDeleteProfileTransfer);
+$("#delete-profile-form").addEventListener("submit",async e=>{
+  e.preventDefault();const form=e.currentTarget,f=new FormData(form),target=state.members.find(m=>m.id===f.get("member_id"));
+  if(!target)return;
+  if(!window.confirm("Delete the profile for "+target.name+"? This action cannot be undone."))return;
+  const payload={pin:f.get("pin"),task_action:f.get("task_action"),transfer_organizer_id:f.get("transfer_organizer_id")||null};
+  try{
+    await api("/api/members/"+encodeURIComponent(target.id),{method:"DELETE",body:JSON.stringify(payload)});
+    $("#delete-profile-dialog").close();
+    if(target.id===state.me.id){state.me=null;await api("/api/logout",{method:"POST"});await renderHomeProfiles(await api("/api/homes/current/profiles"));showScreen("home-screen");showToast("Your profile was deleted");}
+    else{openDashboard(await api("/api/me"));showToast(target.name+"’s profile was deleted");}
+  }catch(error){$("#delete-profile-error").textContent=error.message;}
+});
+$("#delete-home-button").addEventListener("click",()=>{
+  closeAccountMenu();if(previewMode)return;
+  $("#delete-home-name").textContent=state.household?.name||"your home";
+  $("#delete-home-error").textContent="";$("#delete-home-form").reset();$("#delete-home-dialog").showModal();
+});
+$("#close-delete-home").addEventListener("click",()=>$("#delete-home-dialog").close());
+$("#delete-home-dialog").addEventListener("click",e=>{if(e.target===$("#delete-home-dialog"))$("#delete-home-dialog").close();});
+$("#delete-home-form").addEventListener("submit",async e=>{
+  e.preventDefault();const f=new FormData(e.currentTarget);
+  if(!window.confirm("Permanently delete this home and all of its data?"))return;
+  try{await api("/api/homes/current",{method:"DELETE",body:JSON.stringify({confirmation:f.get("confirmation"),pin:f.get("pin")})});$("#delete-home-dialog").close();state.me=null;$("#home-profiles-wrap").classList.add("hidden");$("#home-login-form").classList.remove("hidden");$("#forgot-home-button").classList.remove("hidden");$("#toggle-create-home").classList.remove("hidden");$("#create-home-form").classList.add("hidden");$("#home-login-form").reset();showScreen("home-screen");showToast("Home and its data were deleted");}
+  catch(error){$("#delete-home-error").textContent=error.message;}
+});
 $("#sign-out-home").addEventListener("click",async()=>{
   try{await api("/api/homes/logout",{method:"POST"});$("#home-profiles-wrap").classList.add("hidden");$("#home-login-form").classList.remove("hidden");$("#forgot-home-button").classList.remove("hidden");$("#toggle-create-home").classList.remove("hidden");$("#create-home-form").classList.add("hidden");$("#home-login-form").reset();$("#home-login-error").textContent="";showScreen("home-screen");}
   catch(error){showToast(error.message);}
 });
 $("#task-form").addEventListener("submit", async e => {
-  e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note")};
-  try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; await loadTasks(); showToast(result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
+  e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note"),recurrence:f.get("recurrence")||null};
+  try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();$("#recurrence-field").classList.add("hidden");$("#task-form [name=due_date]").required=false;$("#task-form [name=recurrence]").disabled=true;showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; $("#recurrence-field").classList.add("hidden");$("#task-form [name=due_date]").required=false;$("#task-form [name=recurrence]").disabled=true;await loadTasks(); showToast(payload.recurrence?"Recurring task added to the calendar":result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
   catch(error) { showToast(error.message); }
 });
 $("#close-dialog").addEventListener("click",()=>$("#task-dialog").close());
@@ -383,7 +514,8 @@ $("#task-edit-form").addEventListener("submit",async e=>{
 });
 $("#task-delete-button").addEventListener("click",async()=>{
   const task=state.tasks.find(item=>item.id===state.activeTaskId);if(!task||task.created_by!==state.me.id){showToast("Only the task creator can delete this task");return;}
-  if(!window.confirm(`Delete “${task.title}”? This can’t be undone.`))return;
+  const deletePrompt=task.recurrence_id?`Delete this “${task.title}” occurrence? The recurring schedule will continue.`:`Delete “${task.title}”? This can’t be undone.`;
+  if(!window.confirm(deletePrompt))return;
   try{if(previewMode){state.tasks=state.tasks.filter(item=>item.id!==task.id);renderTasks();}else{await api(`/api/tasks/${task.id}`,{method:"DELETE"});await loadTasks();}$("#task-detail-dialog").close();showToast("Task deleted");}
   catch(error){showToast(error.message);}
 });
@@ -398,15 +530,24 @@ $("#member-form").addEventListener("submit",async e=>{
   try { const data=previewMode?{member:{id:crypto.randomUUID(),name:f.get("name"),email:f.get("email"),role:"member",activated:true}}:await api("/api/members",{method:"POST",body:JSON.stringify({name:f.get("name"),email:f.get("email")})}); state.members.push(data.member); populateMembers(); $("#member-dialog").close(); e.currentTarget.reset(); showToast(`${data.member.name} added · get their setup link on the Family board`); }
   catch(error){showToast(error.message);} finally{button.disabled=false;}
 });
-["#add-task-top","#mobile-add","#empty-add","#family-empty-add"].forEach(id=>$(id).addEventListener("click",openTaskDialog));
+$("#add-task-top").addEventListener("click",e=>toggleAddTaskMenu(e.currentTarget));
+$("#mobile-add").addEventListener("click",e=>toggleAddTaskMenu(e.currentTarget));
+$("#empty-add").addEventListener("click",openTaskDialog);
+$("#family-empty-add").addEventListener("click",openTaskDialog);
+$("#add-task-menu").addEventListener("click",e=>{const option=e.target.closest("[data-create-task]");if(option)showTaskDialog(option.dataset.createTask);});
+document.addEventListener("click",e=>{if(!e.target.closest(".add-task-trigger")&&!e.target.closest("#add-task-menu"))closeAddTaskMenu();});
+$$('[data-my-filter]').forEach(button=>button.addEventListener("click",()=>{state.myFilter=button.dataset.myFilter;renderTasks();}));
 $$('[data-view]').forEach(button=>button.addEventListener("click",()=>setView(button.dataset.view)));
-$$('[data-filter]').forEach(button=>button.addEventListener("click",()=>{state.familyFilter=button.dataset.filter; $$('.filter-chip').forEach(b=>b.classList.toggle("selected",b===button)); renderTasks();}));
+$$('[data-filter]').forEach(button=>button.addEventListener("click",()=>{state.familyFilter=button.dataset.filter; $$(".board-filters .filter-chip").forEach(b=>b.classList.toggle("selected",b===button)); renderTasks();}));
 $("#member-filter").addEventListener("change",e=>{state.memberFilter=e.target.value;renderTasks();});
 $("#my-task-search").addEventListener("input",e=>{state.mySearch=e.target.value.trim().toLocaleLowerCase();renderTasks();});
 $("#family-task-search").addEventListener("input",e=>{state.familySearch=e.target.value.trim().toLocaleLowerCase();renderTasks();});
 $("#clear-my-search").addEventListener("click",()=>{$("#my-task-search").value="";state.mySearch="";renderTasks();$("#my-task-search").focus();});
-$("#clear-family-search").addEventListener("click",()=>{$("#family-task-search").value="";state.familySearch="";renderTasks();$("#family-task-search").focus();});
-$("#my-filter").addEventListener("click",()=>{state.myFilter=state.myFilter==="active"?"all":"active";$("#my-filter").innerHTML=`${state.myFilter==="active"?"Active":"All"} <span>⌄</span>`;renderTasks();});
+$("#clear-family-search").addEventListener("click",()=>{
+  if(state.familySearch){$("#family-task-search").value="";state.familySearch="";$("#family-task-search").focus();}
+  else{state.familyFilter="all";state.memberFilter="all";$("#member-filter").value="all";$(".board-filters .filter-chip").forEach(button=>button.classList.toggle("selected",button.dataset.filter==="all"));}
+  renderTasks();
+});
 const savedTheme=localStorage.getItem("together-theme"); if(savedTheme) document.documentElement.dataset.theme=savedTheme;
 function updateThemeIcon(){ $("#theme-icon").textContent=document.documentElement.dataset.theme==="dark"?"☀":"☾"; }
 updateThemeIcon();

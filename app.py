@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import calendar
 import hashlib
 import hmac
 import json
@@ -14,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -35,6 +36,14 @@ if os.getenv("K_SERVICE") and not os.getenv("SESSION_SECRET"):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def household_today(data: dict[str, Any]) -> date:
+    timezone_name = (data.get("household") or {}).get("timezone", TZ_NAME)
+    try:
+        return datetime.now(ZoneInfo(timezone_name)).date()
+    except ZoneInfoNotFoundError:
+        return datetime.now().date()
 
 
 def _read_local() -> dict[str, Any]:
@@ -91,10 +100,10 @@ def home_data(home_id: str | None = None) -> dict[str, Any]:
     """Read one home while retaining the original single-home record for compatibility."""
     root = load_data()
     if home_id and (root.get("household") or {}).get("id") == home_id:
-        return {k: root[k] for k in ("household", "members", "tasks") if k in root}
+        return {k: root[k] for k in ("household", "members", "tasks", "recurring_series") if k in root}
     if home_id and home_id in root.get("homes", {}):
         return root["homes"][home_id]
-    return {k: root.get(k) for k in ("household", "members", "tasks")}
+    return {k: root.get(k) for k in ("household", "members", "tasks", "recurring_series")}
 
 
 def save_home(data: dict[str, Any]) -> None:
@@ -115,7 +124,7 @@ def all_homes() -> list[dict[str, Any]]:
     root = load_data()
     homes = list(root.get("homes", {}).values())
     if root.get("household"):
-        homes.append({k: root[k] for k in ("household", "members", "tasks") if k in root})
+        homes.append({k: root[k] for k in ("household", "members", "tasks", "recurring_series") if k in root})
     return homes
 
 
@@ -289,6 +298,11 @@ class HomeLoginInput(BaseModel):
     pin: str = Field(pattern=r"^\d{4,6}$")
 
 
+class HomeMemberCreateInput(MemberInput):
+    organizer_id: str
+    pin: str = Field(pattern=r"^\d{4,6}$")
+
+
 class ProfilePinResetInput(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     home_pin: str = Field(pattern=r"^\d{4,6}$")
@@ -340,6 +354,7 @@ class TaskInput(BaseModel):
     due_date: date | None = None
     priority: str = Field(default="normal", pattern=r"^(low|normal|high)$")
     note: str = Field(default="", max_length=800)
+    recurrence: str | None = Field(default=None, pattern=r"^(daily|weekly|monthly|yearly)$")
 
 
 class TaskUpdate(BaseModel):
@@ -352,6 +367,17 @@ class TaskEdit(BaseModel):
     due_date: date | None = None
     priority: str = Field(default="normal", pattern=r"^(low|normal|high)$")
     note: str = Field(default="", max_length=800)
+
+
+class ProfileDeleteInput(BaseModel):
+    pin: str = Field(pattern=r"^\d{4,6}$")
+    task_action: str = Field(pattern=r"^(reassign|delete_tasks)$")
+    transfer_organizer_id: str | None = None
+
+
+class HomeDeleteInput(BaseModel):
+    pin: str = Field(pattern=r"^\d{4,6}$")
+    confirmation: str = Field(min_length=1, max_length=80)
 
 
 class MemberAdd(MemberInput):
@@ -427,6 +453,32 @@ def home_profiles(request: Request) -> dict[str, Any]:
     if not data.get("household"):
         raise HTTPException(status_code=404, detail="Home not found")
     return {"household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]]}
+
+
+@app.post("/api/homes/current/profiles/members")
+def add_member_from_home(payload: HomeMemberCreateInput, request: Request) -> dict[str, Any]:
+    home_token = read_token(request.cookies.get("family_home", ""))
+    if not home_token:
+        raise HTTPException(status_code=401, detail="Sign in to your home first")
+    data = home_data(home_token.get("h"))
+    if not data.get("household") or data["household"].get("id") != home_token.get("h"):
+        raise HTTPException(status_code=404, detail="Home not found")
+    bucket = client_bucket(request, "add-family-profile")
+    check_rate_limit(bucket, limit=10)
+    organizer = next((item for item in data["members"] if item["id"] == payload.organizer_id), None)
+    if not organizer or organizer.get("role") != "admin" or not organizer.get("pin"):
+        raise HTTPException(status_code=403, detail="Choose an active organizer profile")
+    supplied = pin_hash(payload.pin, organizer["pin"]["salt"])["hash"]
+    if not hmac.compare_digest(supplied, organizer["pin"]["hash"]):
+        raise HTTPException(status_code=401, detail="The organizer PIN did not match")
+    clear_rate_limit(bucket)
+    if payload.email and any(item["email"].lower() == payload.email.lower() for item in data["members"]):
+        raise HTTPException(status_code=409, detail="That email is already in this household")
+    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "session_version": 0, "role": "member", "created_at": now_iso()}
+    data["members"].append(added)
+    invitation_sent, invite_url = issue_invitation(added, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
+    save_home(data)
+    return {"member": public_member(added), "invitation_sent": invitation_sent, "invite_url": invite_url}
 
 
 @app.post("/api/homes/profile-pin-reset")
@@ -644,7 +696,7 @@ def logout(response: Response) -> dict[str, bool]:
 @app.get("/api/me")
 def me(request: Request) -> dict[str, Any]:
     member, data = current_member(request)
-    return {"member": public_member(member), "household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]]}
+    return {"member": public_member(member), "household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]], "is_primary_organizer": member["id"] == primary_organizer_id(data), "primary_organizer_id": primary_organizer_id(data)}
 
 
 @app.post("/api/me/pin")
@@ -696,6 +748,82 @@ def resend_invitation(member_id: str, request: Request) -> dict[str, Any]:
     return {"invitation_sent": sent, "member": public_member(target), "invite_url": invite_url}
 
 
+@app.delete("/api/members/{member_id}")
+def delete_member(member_id: str, payload: ProfileDeleteInput, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    target = next((item for item in data["members"] if item["id"] == member_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Family profile not found")
+    deleting_self = target["id"] == member["id"]
+    if not deleting_self and member.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an organizer can delete another family profile")
+    if not member.get("pin") or not hmac.compare_digest(pin_hash(payload.pin, member["pin"]["salt"])["hash"], member["pin"]["hash"]):
+        raise HTTPException(status_code=401, detail="Your profile PIN did not match")
+
+    household = data["household"]
+    primary_id = primary_organizer_id(data)
+    if target["id"] == primary_id:
+        replacement = next((item for item in data["members"] if item["id"] == payload.transfer_organizer_id and item["id"] != target["id"] and item.get("pin")), None)
+        if not deleting_self or not replacement:
+            raise HTTPException(status_code=409, detail="Transfer primary organizer ownership to another active profile before deleting this profile")
+        household["primary_organizer_id"] = replacement["id"]
+        replacement["role"] = "admin"
+        primary_id = replacement["id"]
+    if len(data["members"]) <= 1:
+        raise HTTPException(status_code=409, detail="Delete the home itself if you want to remove its only profile")
+
+    primary = next((item for item in data["members"] if item["id"] == primary_id and item["id"] != target["id"]), None)
+    organizer = primary or member
+    if payload.task_action == "delete_tasks":
+        data["tasks"] = [task for task in data["tasks"] if task.get("assignee_id") != target["id"] and task.get("original_assignee_id") != target["id"]]
+    else:
+        for task in data["tasks"]:
+            if task.get("assignee_id") == target["id"]:
+                task["assignee_id"] = organizer["id"]
+            if task.get("original_assignee_id") == target["id"]:
+                task["original_assignee_id"] = organizer["id"]
+    for task in data["tasks"]:
+        if task.get("created_by") == target["id"]:
+            task["creator_name"] = target["name"]
+            task["created_by"] = organizer["id"]
+    for series in data.get("recurring_series", []):
+        if series.get("created_by") == target["id"]:
+            series["creator_name"] = target["name"]
+            series["created_by"] = organizer["id"]
+        if series.get("assignee_id") == target["id"]:
+            if payload.task_action == "delete_tasks":
+                series["active"] = False
+            else:
+                series["assignee_id"] = organizer["id"]
+    if household.get("recovery_organizer_id") == target["id"]:
+        household.pop("recovery_organizer_id", None)
+    data["members"].remove(target)
+    save_home(data)
+    return {"ok": True}
+
+
+@app.delete("/api/homes/current")
+def delete_home(payload: HomeDeleteInput, request: Request, response: Response) -> dict[str, bool]:
+    member, data = current_member(request)
+    household = data.get("household") or {}
+    if member.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only a household organizer can delete this home")
+    if payload.confirmation.strip() != household.get("name"):
+        raise HTTPException(status_code=422, detail="Enter the exact home name to confirm deletion")
+    if not member.get("pin") or not hmac.compare_digest(pin_hash(payload.pin, member["pin"]["salt"])["hash"], member["pin"]["hash"]):
+        raise HTTPException(status_code=401, detail="Your profile PIN did not match")
+    root = load_data()
+    home_id = household["id"]
+    root.setdefault("homes", {}).pop(home_id, None)
+    if (root.get("household") or {}).get("id") == home_id:
+        for key in ("household", "members", "tasks", "recurring_series"):
+            root.pop(key, None)
+    save_data(root)
+    response.delete_cookie("family_session", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+    response.delete_cookie("family_home", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+    return {"ok": True}
+
+
 def issue_invitation(member: dict[str, Any], base_url: str) -> tuple[bool, str]:
     raw_token = secrets.token_urlsafe(32)
     member["invite_token_hash"] = hashlib.sha256(raw_token.encode()).hexdigest()
@@ -745,13 +873,57 @@ def public_task(task: dict[str, Any], members: list[dict[str, Any]]) -> dict[str
     creator = next((m for m in members if m["id"] == task.get("created_by")), None)
     task = {k: v for k, v in task.items() if k != "reminders_sent"}
     task["assignee"] = public_member(assigned) if assigned else None
-    task["creator"] = {"id": creator["id"], "name": creator["name"]} if creator else None
+    creator_name = task.get("creator_name") or (creator["name"] if creator else None)
+    task["creator"] = {"id": task.get("created_by"), "name": creator_name} if creator_name else None
     return task
+
+
+def recurring_date(anchor: date, cadence: str, index: int) -> date:
+    if cadence == "daily":
+        return anchor + timedelta(days=index)
+    if cadence == "weekly":
+        return anchor + timedelta(weeks=index)
+    if cadence == "monthly":
+        month_index = anchor.year * 12 + anchor.month - 1 + index
+        year, month = divmod(month_index, 12)
+        month += 1
+        return date(year, month, min(anchor.day, calendar.monthrange(year, month)[1]))
+    year = anchor.year + index
+    return date(year, anchor.month, min(anchor.day, calendar.monthrange(year, anchor.month)[1]))
+
+
+def materialize_recurring_tasks(data: dict[str, Any], through: date) -> bool:
+    changed = False
+    data.setdefault("recurring_series", [])
+    data.setdefault("tasks", [])
+    for series in data["recurring_series"]:
+        if not series.get("active", True):
+            continue
+        anchor = date.fromisoformat(series["anchor_date"])
+        index = int(series.get("next_index", 1))
+        next_due = date.fromisoformat(series.get("next_due_date") or recurring_date(anchor, series["cadence"], index).isoformat())
+        while next_due <= through:
+            data["tasks"].append({
+                "id": str(uuid4()), "title": series["title"], "assignee_id": series["assignee_id"],
+                "original_assignee_id": series["assignee_id"], "created_by": series["created_by"],
+                "creator_name": series.get("creator_name"), "due_date": next_due.isoformat(),
+                "priority": series["priority"], "note": series["note"], "status": "todo",
+                "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": [],
+                "recurrence_id": series["id"], "recurrence": series["cadence"], "recurrence_index": index,
+            })
+            index += 1
+            next_due = recurring_date(anchor, series["cadence"], index)
+            series["next_index"] = index
+            series["next_due_date"] = next_due.isoformat()
+            changed = True
+    return changed
 
 
 @app.get("/api/tasks")
 def list_tasks(request: Request, assignee: str | None = None, status: str | None = None) -> dict[str, Any]:
     _, data = current_member(request)
+    if materialize_recurring_tasks(data, household_today(data)):
+        save_home(data)
     tasks = data["tasks"]
     if assignee:
         tasks = [t for t in tasks if t["assignee_id"] == assignee]
@@ -767,11 +939,34 @@ def create_task(payload: TaskInput, request: Request) -> dict[str, Any]:
     assignee = next((m for m in data["members"] if m["id"] == payload.assignee_id), None)
     if not assignee:
         raise HTTPException(status_code=422, detail="Choose a member of this household")
-    task = {"id": str(uuid4()), "title": payload.title.strip(), "assignee_id": payload.assignee_id, "original_assignee_id": payload.assignee_id, "created_by": member["id"], "due_date": payload.due_date.isoformat() if payload.due_date else None, "priority": payload.priority, "note": payload.note.strip(), "status": "todo", "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": []}
+    if payload.recurrence and not payload.due_date:
+        raise HTTPException(status_code=422, detail="Choose the first due date for a recurring task")
+    if payload.recurrence and payload.due_date < household_today(data):
+        raise HTTPException(status_code=422, detail="Choose today or a future date to start a recurring task")
+    task = {"id": str(uuid4()), "title": payload.title.strip(), "assignee_id": payload.assignee_id, "original_assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "due_date": payload.due_date.isoformat() if payload.due_date else None, "priority": payload.priority, "note": payload.note.strip(), "status": "todo", "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": []}
+    if payload.recurrence:
+        data.setdefault("recurring_series", [])
+        series_id = str(uuid4())
+        task.update({"recurrence_id": series_id, "recurrence": payload.recurrence, "recurrence_index": 0})
+        next_due = recurring_date(payload.due_date, payload.recurrence, 1)
+        data["recurring_series"].append({"id": series_id, "title": task["title"], "assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "anchor_date": payload.due_date.isoformat(), "cadence": payload.recurrence, "next_index": 1, "next_due_date": next_due.isoformat(), "priority": payload.priority, "note": task["note"], "active": True})
     data["tasks"].append(task)
     save_data(data)
     email_sent = send_email(assignee["email"], f"New family task: {task['title']}", f"{member['name']} assigned you a task.\n\n{task['title']}\nDue: {task['due_date'] or 'No due date'}\n\nOpen your family dashboard to see the details.")
     return {"task": public_task(task, data["members"]), "email_sent": email_sent}
+
+
+@app.delete("/api/recurring/{series_id}")
+def stop_recurring_task(series_id: str, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    series = next((item for item in data.get("recurring_series", []) if item["id"] == series_id), None)
+    if not series:
+        raise HTTPException(status_code=404, detail="Recurring task not found")
+    if series.get("created_by") != member["id"]:
+        raise HTTPException(status_code=403, detail="Only the person who created this recurring task can stop it")
+    series["active"] = False
+    save_home(data)
+    return {"ok": True}
 
 
 @app.patch("/api/tasks/{task_id}")
@@ -852,7 +1047,7 @@ def reminders(authorization: str | None = Header(default=None)) -> dict[str, int
     if not os.getenv("RESEND_API_KEY") or not os.getenv("EMAIL_FROM"):
         return {"sent": 0}
     data = load_data()
-    today = datetime.now(ZoneInfo(data["household"].get("timezone", TZ_NAME))).date()
+    today = household_today(data)
     sent = 0
     for task in data["tasks"]:
         if task["status"] == "done" or not task.get("due_date"):
