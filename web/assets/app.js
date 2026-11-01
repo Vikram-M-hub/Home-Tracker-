@@ -58,6 +58,7 @@ async function start() {
   }
 }
 async function renderHomeProfiles(data) {
+  showScreen("home-screen");
   $("#home-profiles-wrap").classList.remove("hidden"); $("#home-login-form").classList.add("hidden"); $("#toggle-create-home").classList.add("hidden"); $("#create-home-form").classList.add("hidden");
   $("#forgot-home-button").classList.add("hidden");
   $("#home-profile-login").classList.add("hidden"); $("#home-profile-login").reset(); $("#home-profile-reset-form").classList.add("hidden"); $("#home-profile-reset-form").reset();
