@@ -8,8 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/styles.css?v=web-features-3">
-  <link rel="stylesheet" href="assets/recovery.css?v=web-features-3">
+  <link rel="stylesheet" href="assets/styles.css?v=web-features-4">
+  <link rel="stylesheet" href="assets/recovery.css?v=web-features-4">
+  <link rel="stylesheet" href="assets/enhancements.css?v=web-features-4">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -107,7 +108,7 @@
         <div class="topbar-actions">
           <span id="preview-badge" class="preview-badge hidden">SAMPLE PREVIEW</span>
           <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span id="theme-icon">☾</span></button>
-          <div class="account-menu-wrap"><button id="account-button" class="account-button" type="button" aria-expanded="false" aria-haspopup="true"><span id="account-avatar" class="avatar">S</span><span class="account-name" id="account-name">Sam</span><span class="chevron">⌄</span></button><div id="account-menu" class="account-menu hidden"><button id="profile-signout" class="account-menu-item account-menu-signout" type="button">Sign out</button><button id="recovery-options-button" class="account-menu-item hidden" type="button">Recovery options</button><button id="home-credentials-button" class="account-menu-item hidden" type="button">Set home sign-in</button><button id="change-pin-button" class="account-menu-item" type="button">Change PIN</button><button id="delete-profile-button" class="account-menu-item account-menu-danger" type="button">Delete my profile</button><button id="delete-member-button" class="account-menu-item account-menu-danger hidden" type="button">Delete a family profile</button><button id="delete-home-button" class="account-menu-item account-menu-danger hidden" type="button">Delete this home</button></div></div>
+          <div class="account-menu-wrap"><button id="account-button" class="account-button" type="button" aria-expanded="false" aria-haspopup="true"><span id="account-avatar" class="avatar">S</span><span class="account-name" id="account-name">Sam</span><span class="chevron">⌄</span></button><div id="account-menu" class="account-menu hidden"><button id="profile-signout" class="account-menu-item account-menu-signout" type="button">Sign out</button><button id="recovery-options-button" class="account-menu-item hidden" type="button">Recovery options</button><button id="home-credentials-button" class="account-menu-item hidden" type="button">Set home sign-in</button><button id="change-pin-button" class="account-menu-item" type="button">Change PIN</button><button id="help-menu-button" class="account-menu-item" type="button">Help & how to</button><a class="account-menu-item" href="/privacy" target="_blank" rel="noopener">Privacy policy</a><button id="export-home-button" class="account-menu-item hidden" type="button">Download home data</button><button id="delete-profile-button" class="account-menu-item account-menu-danger" type="button">Delete my profile</button><button id="delete-member-button" class="account-menu-item account-menu-danger hidden" type="button">Delete a family profile</button><button id="delete-home-button" class="account-menu-item account-menu-danger hidden" type="button">Delete this home</button></div></div>
         </div>
       </header>
       <div class="page-wrap">
@@ -153,7 +154,8 @@
       <div class="dialog-top"><div><div class="eyebrow">MAKE IT HAPPEN</div><h2 id="task-dialog-title">Create a new task</h2></div><button id="close-dialog" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
       <label>What needs to get done?<input name="title" required maxlength="140" placeholder="Pick up the documents from the bank" autocomplete="off"></label>
       <div class="two-fields"><label>Who’s doing it?<select name="assignee_id" id="assignee-select" required></select></label><label>Due date<input name="due_date" type="date"></label></div>
-      <label id="recurrence-field" class="hidden">Repeat<select name="recurrence"><option value="daily">Every day</option><option value="weekly">Every week</option><option value="monthly">Every month</option><option value="yearly">Every year</option></select><small class="form-hint">A new task appears on each scheduled date, even if the previous one is still open.</small></label>
+      <label id="recurrence-field" class="hidden">Repeat<select name="recurrence"><option value="daily">Every day</option><option value="weekly">Every week</option><option value="monthly">Every month</option><option value="yearly">Every year</option></select><small class="form-hint">Tasks follow calendar dates even if an earlier one is still open.</small></label>
+      <label id="weekly-day-field" class="hidden">Repeat on<select name="weekly_day"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select><small class="form-hint">The first task is scheduled on this weekday on or after the date above.</small></label>
       <fieldset class="priority-field"><legend>How urgent is it?</legend><div class="priority-options"><label><input type="radio" name="priority" value="low"><span>Whenever</span></label><label><input type="radio" name="priority" value="normal" checked><span>Normal</span></label><label><input type="radio" name="priority" value="high"><span>Important</span></label></div></fieldset>
       <label>Anything to add? <span class="optional">Optional</span><textarea name="note" rows="2" maxlength="800" placeholder="A little more detail can help"></textarea></label>
       <button class="button button-primary button-wide" type="submit">Add to the list <span>→</span></button>
@@ -173,12 +175,15 @@
           <div class="task-detail-item task-detail-wide"><span>Description</span><p id="detail-task-note"></p></div>
           <div class="task-detail-item"><span>Created by</span><strong id="detail-task-creator"></strong></div>
           <div class="task-detail-item"><span>Created on</span><strong id="detail-task-created"></strong></div>
+          <div id="detail-completion-history" class="task-detail-item task-detail-wide hidden"><span>Completion history</span><div id="detail-completion-events"></div></div>
         </div>
-        <div id="task-owner-actions" class="task-owner-actions hidden"><button id="task-detail-edit" class="button button-primary" type="button">Edit task</button><button id="task-delete-button" class="button button-danger" type="button">Delete task</button><button id="stop-recurring-button" class="button button-danger hidden" type="button">Stop recurring</button></div>
+        <div id="task-owner-actions" class="task-owner-actions hidden"><button id="task-detail-edit" class="button button-primary" type="button">Edit task</button><button id="task-delete-button" class="button button-danger" type="button">Delete task</button><button id="pause-recurring-button" class="button button-secondary hidden" type="button">Pause recurring</button><button id="stop-recurring-button" class="button button-danger hidden" type="button">Stop recurring</button></div>
       </section>
       <form id="task-edit-form" class="dialog-form task-edit-form hidden">
         <label>Task name<input id="edit-task-title" name="title" required maxlength="140"></label>
         <div class="two-fields"><label><span id="edit-task-assignee-label">Assigned to</span><select id="edit-task-assignee" name="assignee_id" required></select></label><label>Due date<input id="edit-task-due" name="due_date" type="date"></label></div>
+        <label id="recurrence-edit-scope-wrap" class="hidden">Apply changes to<select name="edit_scope"><option value="this">Only this occurrence</option><option value="future">This and future occurrences</option></select></label>
+        <label id="edit-weekly-day-wrap" class="hidden">Repeat on<select name="weekly_day"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select><small class="form-hint">The edited occurrence moves to the next selected weekday; future repeats follow it.</small></label>
         <fieldset class="priority-field"><legend>Priority</legend><div class="priority-options"><label><input type="radio" name="priority" value="low"><span>Whenever</span></label><label><input type="radio" name="priority" value="normal"><span>Normal</span></label><label><input type="radio" name="priority" value="high"><span>Important</span></label></div></fieldset>
         <label>Description <span class="optional">Optional</span><textarea id="edit-task-note" name="note" rows="3" maxlength="800"></textarea></label>
         <div class="task-edit-actions"><button id="task-detail-cancel" class="button button-secondary" type="button">Cancel</button><button class="button button-primary" type="submit">Save changes</button></div>
@@ -190,7 +195,6 @@
       <div class="dialog-top"><div><div class="eyebrow">GROW YOUR FAMILY SPACE</div><h2>Add a family member</h2></div><button id="close-member-dialog" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
       <p class="invite-copy">We’ll create a private setup link to share by WhatsApp or text. They’ll choose their own PIN.</p>
       <label>Name<input name="name" required maxlength="60" placeholder="e.g. Asha"></label>
-      <label>Email <span class="optional">Optional · for email alerts later</span><input name="email" type="email" maxlength="254" placeholder="asha@example.com"></label>
       <button class="button button-primary button-wide" type="submit">Add to our family <span>→</span></button>
     </form>
   </dialog>
@@ -201,7 +205,6 @@
       <label>Organizer profile<select name="organizer_id" required></select></label>
       <label>Organizer profile PIN<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="current-password"></label>
       <label>New member’s name<input name="name" required maxlength="60" placeholder="e.g. Asha"></label>
-      <label>Email <span class="optional">Optional · for email alerts later</span><input name="email" type="email" maxlength="254" placeholder="asha@example.com"></label>
       <p id="home-add-member-error" class="field-error" aria-live="polite"></p>
       <button class="button button-primary button-wide" type="submit">Create profile <span>→</span></button>
     </form>
@@ -315,6 +318,17 @@
       <p class="form-hint">Anyone with this link can set up this profile. Share it only with the intended person.</p>
     </div>
   </dialog>
-  <script src="assets/app.js?v=web-features-3" defer></script>
+  <dialog id="help-dialog" class="task-dialog help-dialog">
+    <div class="dialog-form">
+      <div class="dialog-top"><div><div class="eyebrow">TOGETHER HELP</div><h2>Quick guide</h2></div><button id="close-help" class="icon-button close-button" type="button" aria-label="Close">×</button></div>
+      <div class="help-intro">A few simple steps to get your family started.</div>
+      <section class="help-step"><span>1</span><div><h3>Add a family member</h3><p>On the home profile chooser, choose <strong>＋ Add family member</strong>, or use <strong>＋ Family member</strong> on the Family board. Enter the organizer PIN and their name. Copy the setup link and share it privately; it expires after 7 days.</p></div></section>
+      <section class="help-step"><span>2</span><div><h3>Create and update a task</h3><p>Tap <strong>＋</strong>, choose New task, then set the task name, person, due date, and any helpful details. Open a task to see who created it. Mark it In progress or Done as work moves along.</p></div></section>
+      <section class="help-step"><span>3</span><div><h3>Set up a recurring chore</h3><p>Tap <strong>＋ → Recurring task</strong> and choose a schedule. Weekly chores can be tied to a weekday. The task creator can pause or stop a series, or edit just one occurrence or that occurrence and future ones.</p></div></section>
+      <section class="help-step"><span>4</span><div><h3>Find completed tasks or recover access</h3><p>Completed tasks are kept in the collapsed Completed section; older ones are grouped under Older completed. Use the recovery options on your profile menu if you need to recover home access.</p></div></section>
+      <div class="help-footer"><a href="/data-deletion" target="_blank" rel="noopener">How to delete a profile or home</a><a href="/privacy" target="_blank" rel="noopener">Privacy policy</a></div>
+    </div>
+  </dialog>
+  <script src="assets/app.js?v=web-features-4" defer></script>
 </body>
 </html>

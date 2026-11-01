@@ -9,16 +9,14 @@ import os
 import re
 import secrets
 import threading
-import urllib.error
-import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -83,13 +81,38 @@ def load_data() -> dict[str, Any]:
             from psycopg.types.json import Jsonb
 
             with psycopg.connect(_database_url()) as connection:
+                connection.execute("CREATE TABLE IF NOT EXISTS household_state (household_id text PRIMARY KEY, payload jsonb NOT NULL, version bigint NOT NULL DEFAULT 1)")
+                connection.execute("CREATE TABLE IF NOT EXISTS storage_metadata (key text PRIMARY KEY, value text NOT NULL)")
                 connection.execute("CREATE TABLE IF NOT EXISTS family_state (id smallint PRIMARY KEY, payload jsonb NOT NULL)")
                 row = connection.execute("SELECT payload FROM family_state WHERE id = 1").fetchone()
-                if row:
-                    return row[0]
-                empty = {"household": None, "members": [], "tasks": [], "homes": {}}
-                connection.execute("INSERT INTO family_state (id, payload) VALUES (1, %s) ON CONFLICT (id) DO NOTHING", (Jsonb(empty),))
-                return empty
+                if not row:
+                    empty = {"household": None, "members": [], "tasks": [], "homes": {}}
+                    connection.execute("INSERT INTO family_state (id, payload) VALUES (1, %s) ON CONFLICT (id) DO NOTHING", (Jsonb(empty),))
+                    row = connection.execute("SELECT payload FROM family_state WHERE id = 1").fetchone()
+                migrated = connection.execute("SELECT value FROM storage_metadata WHERE key = 'households_migrated'").fetchone()
+                if not migrated:
+                    legacy = row[0] if row else {"household": None, "members": [], "tasks": [], "homes": {}}
+                    documents = _split_house_documents(legacy)
+                    for home_id, document in documents.items():
+                        connection.execute("INSERT INTO household_state (household_id, payload, version) VALUES (%s, %s, 1) ON CONFLICT (household_id) DO NOTHING", (home_id, Jsonb(document)))
+                    primary_id = (legacy.get("household") or {}).get("id", "")
+                    connection.execute("INSERT INTO storage_metadata (key, value) VALUES ('primary_household_id', %s) ON CONFLICT (key) DO NOTHING", (primary_id,))
+                    connection.execute("INSERT INTO storage_metadata (key, value) VALUES ('households_migrated', '1') ON CONFLICT (key) DO NOTHING")
+                rows = connection.execute("SELECT household_id, payload, version FROM household_state ORDER BY household_id").fetchall()
+                if not rows:
+                    return {"household": None, "members": [], "tasks": [], "homes": {}}
+                documents = {}
+                for home_id, payload, version in rows:
+                    payload["_db_version"] = version
+                    documents[home_id] = payload
+                preferred = connection.execute("SELECT value FROM storage_metadata WHERE key = 'primary_household_id'").fetchone()
+                primary_id = preferred[0] if preferred and preferred[0] in documents else next(iter(documents))
+                if not preferred or preferred[0] not in documents:
+                    connection.execute("INSERT INTO storage_metadata (key, value) VALUES ('primary_household_id', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (primary_id,))
+                primary = documents.pop(primary_id)
+                root = {"homes": documents}
+                root.update(primary)
+                return root
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Household data is temporarily unavailable") from exc
     with lock:
@@ -100,13 +123,16 @@ def home_data(home_id: str | None = None) -> dict[str, Any]:
     """Read one home while retaining the original single-home record for compatibility."""
     root = load_data()
     if home_id and (root.get("household") or {}).get("id") == home_id:
-        return {k: root[k] for k in ("household", "members", "tasks", "recurring_series") if k in root}
+        return {k: root[k] for k in ("household", "members", "tasks", "recurring_series", "_db_version") if k in root}
     if home_id and home_id in root.get("homes", {}):
         return root["homes"][home_id]
     return {k: root.get(k) for k in ("household", "members", "tasks", "recurring_series")}
 
 
 def save_home(data: dict[str, Any]) -> None:
+    if _database_url() and not os.getenv("FIRESTORE_COLLECTION"):
+        _save_household_row(data)
+        return
     root = load_data()
     household = data.get("household") or {}
     home_id = household.get("id")
@@ -129,6 +155,12 @@ def all_homes() -> list[dict[str, Any]]:
 
 
 def save_data(data: dict[str, Any]) -> None:
+    if _database_url() and not os.getenv("FIRESTORE_COLLECTION"):
+        if "homes" not in data and (data.get("household") or {}).get("id"):
+            _save_household_row(data)
+        else:
+            _save_household_collection(data)
+        return
     # Existing endpoints save a home document directly. Merge that document
     # into the shared record so one household can never overwrite another.
     if "homes" not in data:
@@ -163,6 +195,67 @@ def save_data(data: dict[str, Any]) -> None:
             raise HTTPException(status_code=503, detail="Could not save household data") from exc
     with lock:
         _write_local(data)
+
+
+def _split_house_documents(root: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    documents: dict[str, dict[str, Any]] = {}
+    primary = root.get("household")
+    if primary and primary.get("id"):
+        home_id = primary["id"]
+        documents[home_id] = {key: root[key] for key in ("household", "members", "tasks", "recurring_series") if key in root}
+    for home_id, document in (root.get("homes") or {}).items():
+        if (document.get("household") or {}).get("id"):
+            documents[home_id] = {key: document[key] for key in ("household", "members", "tasks", "recurring_series") if key in document}
+    return documents
+
+
+def _database_document(data: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in data.items() if key != "_db_version"}
+
+
+def _save_household_row(data: dict[str, Any]) -> None:
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    home_id = (data.get("household") or {}).get("id")
+    if not home_id:
+        raise HTTPException(status_code=400, detail="Home information is missing")
+    version = data.get("_db_version")
+    with psycopg.connect(_database_url()) as connection:
+        connection.execute("CREATE TABLE IF NOT EXISTS household_state (household_id text PRIMARY KEY, payload jsonb NOT NULL, version bigint NOT NULL DEFAULT 1)")
+        connection.execute("CREATE TABLE IF NOT EXISTS storage_metadata (key text PRIMARY KEY, value text NOT NULL)")
+        connection.execute("INSERT INTO storage_metadata (key, value) VALUES ('households_migrated', '1') ON CONFLICT (key) DO NOTHING")
+        connection.execute("INSERT INTO storage_metadata (key, value) VALUES ('primary_household_id', %s) ON CONFLICT (key) DO NOTHING", (home_id,))
+        if version is None:
+            inserted = connection.execute("INSERT INTO household_state (household_id, payload, version) VALUES (%s, %s, 1) ON CONFLICT (household_id) DO NOTHING RETURNING version", (home_id, Jsonb(_database_document(data)))).fetchone()
+            if not inserted:
+                raise HTTPException(status_code=409, detail="This home changed in another session. Reload and try again.")
+        else:
+            updated = connection.execute("UPDATE household_state SET payload = %s, version = version + 1 WHERE household_id = %s AND version = %s RETURNING version", (Jsonb(_database_document(data)), home_id, version)).fetchone()
+            if not updated:
+                raise HTTPException(status_code=409, detail="This home changed in another session. Reload and try again.")
+
+
+def _save_household_collection(root: dict[str, Any]) -> None:
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    documents = _split_house_documents(root)
+    with psycopg.connect(_database_url()) as connection:
+        connection.execute("CREATE TABLE IF NOT EXISTS household_state (household_id text PRIMARY KEY, payload jsonb NOT NULL, version bigint NOT NULL DEFAULT 1)")
+        connection.execute("CREATE TABLE IF NOT EXISTS storage_metadata (key text PRIMARY KEY, value text NOT NULL)")
+        existing = {row[0]: row[1] for row in connection.execute("SELECT household_id, version FROM household_state").fetchall()}
+        for home_id, document in documents.items():
+            version = (root.get("household") or {}).get("_db_version") if home_id == (root.get("household") or {}).get("id") else (root.get("homes", {}).get(home_id) or {}).get("_db_version")
+            if home_id not in existing:
+                connection.execute("INSERT INTO household_state (household_id, payload, version) VALUES (%s, %s, 1)", (home_id, Jsonb(document)))
+            else:
+                updated = connection.execute("UPDATE household_state SET payload = %s, version = version + 1 WHERE household_id = %s AND version = %s RETURNING version", (Jsonb(document), home_id, version)).fetchone()
+                if not updated:
+                    raise HTTPException(status_code=409, detail="A home changed in another session. Reload and try again.")
+        removed = set(existing) - set(documents)
+        if removed:
+            connection.execute("DELETE FROM household_state WHERE household_id = ANY(%s)", (list(removed),))
 
 
 def pin_hash(pin: str, salt: str | None = None) -> dict[str, str]:
@@ -276,6 +369,7 @@ def current_member(request: Request, data: dict[str, Any] | None = None) -> tupl
 
 class MemberInput(BaseModel):
     name: str = Field(min_length=1, max_length=60)
+    # Kept as an ignored compatibility field while older Android builds are in use.
     email: str = Field(default="", max_length=254)
 
 
@@ -355,6 +449,7 @@ class TaskInput(BaseModel):
     priority: str = Field(default="normal", pattern=r"^(low|normal|high)$")
     note: str = Field(default="", max_length=800)
     recurrence: str | None = Field(default=None, pattern=r"^(daily|weekly|monthly|yearly)$")
+    weekly_day: int | None = Field(default=None, ge=0, le=6)
 
 
 class TaskUpdate(BaseModel):
@@ -367,6 +462,12 @@ class TaskEdit(BaseModel):
     due_date: date | None = None
     priority: str = Field(default="normal", pattern=r"^(low|normal|high)$")
     note: str = Field(default="", max_length=800)
+    edit_scope: str = Field(default="this", pattern=r"^(this|future)$")
+    weekly_day: int | None = Field(default=None, ge=0, le=6)
+
+
+class RecurringSeriesAction(BaseModel):
+    action: str = Field(pattern=r"^(pause|resume)$")
 
 
 class ProfileDeleteInput(BaseModel):
@@ -396,6 +497,16 @@ app.mount("/assets", StaticFiles(directory=WEB / "assets"), name="assets")
 @app.get("/", include_in_schema=False)
 def home() -> FileResponse:
     return FileResponse(WEB / "index.html")
+
+
+@app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+def privacy_policy() -> FileResponse:
+    return FileResponse(WEB / "privacy.html")
+
+
+@app.get("/data-deletion", response_class=HTMLResponse, include_in_schema=False)
+def data_deletion() -> FileResponse:
+    return FileResponse(WEB / "data-deletion.html")
 
 
 @app.get("/api/health")
@@ -472,9 +583,7 @@ def add_member_from_home(payload: HomeMemberCreateInput, request: Request) -> di
     if not hmac.compare_digest(supplied, organizer["pin"]["hash"]):
         raise HTTPException(status_code=401, detail="The organizer PIN did not match")
     clear_rate_limit(bucket)
-    if payload.email and any(item["email"].lower() == payload.email.lower() for item in data["members"]):
-        raise HTTPException(status_code=409, detail="That email is already in this household")
-    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "session_version": 0, "role": "member", "created_at": now_iso()}
+    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": "", "pin": None, "session_version": 0, "role": "member", "created_at": now_iso()}
     data["members"].append(added)
     invitation_sent, invite_url = issue_invitation(added, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
     save_home(data)
@@ -590,6 +699,23 @@ def recovery_settings(request: Request) -> dict[str, Any]:
     }
 
 
+@app.get("/api/homes/current/export")
+def export_home_data(request: Request) -> Response:
+    member, data = current_member(request)
+    if member.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only a household organizer can export home data")
+    export = {
+        "format": "together-household-export-v1",
+        "exported_at": now_iso(),
+        "household": public_household(data["household"]),
+        "members": [{"id": item["id"], "name": item["name"], "role": item["role"], "activated": bool(item.get("pin")), "created_at": item.get("created_at")} for item in data["members"]],
+        "tasks": data.get("tasks", []),
+        "recurring_series": data.get("recurring_series", []),
+    }
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", data["household"].get("name", "home")).strip("-._") or "home"
+    return Response(content=json.dumps(export, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{filename}-together-export.json"'})
+
+
 @app.post("/api/homes/current/recovery-code")
 def replace_recovery_code(payload: RecoveryCodeSetupInput, request: Request) -> dict[str, str]:
     member, data = current_member(request)
@@ -642,7 +768,7 @@ def setup(payload: SetupInput, request: Request, response: Response) -> dict[str
     household = {"id": str(uuid4()), "name": payload.household_name.strip(), "timezone": TZ_NAME, "created_at": now_iso()}
     members = []
     for index, item in enumerate(payload.members):
-        members.append({"id": str(uuid4()), "name": item.name.strip(), "email": item.email.strip(), "pin": pin_hash(payload.organizer_pin) if index == 0 else None, "session_version": 0, "role": "admin" if index == 0 else "member", "created_at": now_iso()})
+        members.append({"id": str(uuid4()), "name": item.name.strip(), "email": "", "pin": pin_hash(payload.organizer_pin) if index == 0 else None, "session_version": 0, "role": "admin" if index == 0 else "member", "created_at": now_iso()})
     household["primary_organizer_id"] = members[0]["id"]
     data = {"household": household, "members": members, "tasks": []}
     base_url = os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/"))
@@ -653,7 +779,7 @@ def setup(payload: SetupInput, request: Request, response: Response) -> dict[str
 
 
 def public_member(member: dict[str, Any]) -> dict[str, Any]:
-    return {"id": member["id"], "name": member["name"], "email": member["email"], "role": member["role"], "activated": bool(member.get("pin")), "invited": bool(member.get("invite_token_hash"))}
+    return {"id": member["id"], "name": member["name"], "role": member["role"], "activated": bool(member.get("pin")), "invited": bool(member.get("invite_token_hash"))}
 
 
 def public_household(household: dict[str, Any]) -> dict[str, Any]:
@@ -724,9 +850,7 @@ def add_member(payload: MemberAdd, request: Request) -> dict[str, Any]:
     member, data = current_member(request)
     if member["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only the household organizer can add members")
-    if payload.email and any(m["email"].lower() == payload.email.lower() for m in data["members"]):
-        raise HTTPException(status_code=409, detail="That email is already in this household")
-    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": payload.email.strip(), "pin": None, "session_version": 0, "role": "member", "created_at": now_iso()}
+    added = {"id": str(uuid4()), "name": payload.name.strip(), "email": "", "pin": None, "session_version": 0, "role": "member", "created_at": now_iso()}
     data["members"].append(added)
     invitation_sent, invite_url = issue_invitation(added, os.getenv("PUBLIC_URL", str(request.base_url).rstrip("/")))
     save_data(data)
@@ -784,11 +908,18 @@ def delete_member(member_id: str, payload: ProfileDeleteInput, request: Request)
                 task["original_assignee_id"] = organizer["id"]
     for task in data["tasks"]:
         if task.get("created_by") == target["id"]:
-            task["creator_name"] = target["name"]
+            task["creator_name"] = "Former member"
             task["created_by"] = organizer["id"]
+        if task.get("completed_by") == target["id"]:
+            task["completed_by_name"] = "Former member"
+            task["completed_by"] = organizer["id"]
+        for event in task.get("completion_history", []):
+            if event.get("member_id") == target["id"]:
+                event["member_name"] = "Former member"
+                event["member_id"] = organizer["id"]
     for series in data.get("recurring_series", []):
         if series.get("created_by") == target["id"]:
-            series["creator_name"] = target["name"]
+            series["creator_name"] = "Former member"
             series["created_by"] = organizer["id"]
         if series.get("assignee_id") == target["id"]:
             if payload.task_action == "delete_tasks":
@@ -829,10 +960,7 @@ def issue_invitation(member: dict[str, Any], base_url: str) -> tuple[bool, str]:
     member["invite_token_hash"] = hashlib.sha256(raw_token.encode()).hexdigest()
     member["invite_expires_at"] = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     invite_url = f"{base_url.rstrip('/')}/?invite={raw_token}"
-    sent = False
-    if member.get("email") and os.getenv("RESEND_API_KEY") and os.getenv("EMAIL_FROM"):
-        sent = send_email(member["email"], "Set up your Together family profile", f"Hi {member['name']},\n\nYou have been invited to your family’s Together dashboard. Choose your own 4–6 digit PIN using this secure link (valid for 7 days):\n\n{invite_url}\n\nIf you weren’t expecting this, you can ignore this email.")
-    return sent, invite_url
+    return False, invite_url
 
 
 def invited_member(token: str, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -878,6 +1006,12 @@ def public_task(task: dict[str, Any], members: list[dict[str, Any]]) -> dict[str
     return task
 
 
+def record_task_event(task: dict[str, Any], action: str, member: dict[str, Any]) -> None:
+    events = task.setdefault("completion_history", [])
+    events.append({"action": action, "member_id": member["id"], "member_name": member["name"], "at": now_iso()})
+    del events[:-100]
+
+
 def recurring_date(anchor: date, cadence: str, index: int) -> date:
     if cadence == "daily":
         return anchor + timedelta(days=index)
@@ -892,16 +1026,21 @@ def recurring_date(anchor: date, cadence: str, index: int) -> date:
     return date(year, anchor.month, min(anchor.day, calendar.monthrange(year, anchor.month)[1]))
 
 
+def first_date_for_weekday(start: date, weekday: int) -> date:
+    return start + timedelta(days=(weekday - start.weekday()) % 7)
+
+
 def materialize_recurring_tasks(data: dict[str, Any], through: date) -> bool:
     changed = False
     data.setdefault("recurring_series", [])
     data.setdefault("tasks", [])
     for series in data["recurring_series"]:
-        if not series.get("active", True):
+        if not series.get("active", True) or series.get("paused", False):
             continue
         anchor = date.fromisoformat(series["anchor_date"])
         index = int(series.get("next_index", 1))
-        next_due = date.fromisoformat(series.get("next_due_date") or recurring_date(anchor, series["cadence"], index).isoformat())
+        anchor_index = int(series.get("anchor_index", 0))
+        next_due = date.fromisoformat(series.get("next_due_date") or recurring_date(anchor, series["cadence"], index - anchor_index).isoformat())
         while next_due <= through:
             data["tasks"].append({
                 "id": str(uuid4()), "title": series["title"], "assignee_id": series["assignee_id"],
@@ -910,9 +1049,10 @@ def materialize_recurring_tasks(data: dict[str, Any], through: date) -> bool:
                 "priority": series["priority"], "note": series["note"], "status": "todo",
                 "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": [],
                 "recurrence_id": series["id"], "recurrence": series["cadence"], "recurrence_index": index,
+                "weekly_day": series.get("weekly_day"),
             })
             index += 1
-            next_due = recurring_date(anchor, series["cadence"], index)
+            next_due = recurring_date(anchor, series["cadence"], index - anchor_index)
             series["next_index"] = index
             series["next_due_date"] = next_due.isoformat()
             changed = True
@@ -930,7 +1070,16 @@ def list_tasks(request: Request, assignee: str | None = None, status: str | None
     if status:
         tasks = [t for t in tasks if t["status"] == status]
     tasks = sorted(tasks, key=lambda t: (t["status"] == "done", t.get("due_date") or "9999-12-31", t["created_at"]))
-    return {"tasks": [public_task(t, data["members"]) for t in tasks]}
+    series_by_id = {item["id"]: item for item in data.get("recurring_series", [])}
+    result = []
+    for task in tasks:
+        value = dict(task)
+        series = series_by_id.get(task.get("recurrence_id"))
+        if series:
+            value["recurrence_paused"] = bool(series.get("paused", False))
+            value["recurrence_stopped"] = not series.get("active", True)
+        result.append(public_task(value, data["members"]))
+    return {"tasks": result}
 
 
 @app.post("/api/tasks")
@@ -943,17 +1092,49 @@ def create_task(payload: TaskInput, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Choose the first due date for a recurring task")
     if payload.recurrence and payload.due_date < household_today(data):
         raise HTTPException(status_code=422, detail="Choose today or a future date to start a recurring task")
-    task = {"id": str(uuid4()), "title": payload.title.strip(), "assignee_id": payload.assignee_id, "original_assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "due_date": payload.due_date.isoformat() if payload.due_date else None, "priority": payload.priority, "note": payload.note.strip(), "status": "todo", "created_at": now_iso(), "updated_at": now_iso(), "reminders_sent": []}
+    first_due = payload.due_date
+    weekly_day = None
+    if payload.recurrence == "weekly" and first_due:
+        weekly_day = payload.weekly_day if payload.weekly_day is not None else first_due.weekday()
+        first_due = first_date_for_weekday(first_due, weekly_day)
+    task = {"id": str(uuid4()), "title": payload.title.strip(), "assignee_id": payload.assignee_id, "original_assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "due_date": first_due.isoformat() if first_due else None, "priority": payload.priority, "note": payload.note.strip(), "status": "todo", "created_at": now_iso(), "updated_at": now_iso(), "completion_history": []}
     if payload.recurrence:
         data.setdefault("recurring_series", [])
         series_id = str(uuid4())
-        task.update({"recurrence_id": series_id, "recurrence": payload.recurrence, "recurrence_index": 0})
-        next_due = recurring_date(payload.due_date, payload.recurrence, 1)
-        data["recurring_series"].append({"id": series_id, "title": task["title"], "assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "anchor_date": payload.due_date.isoformat(), "cadence": payload.recurrence, "next_index": 1, "next_due_date": next_due.isoformat(), "priority": payload.priority, "note": task["note"], "active": True})
+        task.update({"recurrence_id": series_id, "recurrence": payload.recurrence, "recurrence_index": 0, "weekly_day": weekly_day})
+        next_due = recurring_date(first_due, payload.recurrence, 1)
+        data["recurring_series"].append({"id": series_id, "title": task["title"], "assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "anchor_date": first_due.isoformat(), "anchor_index": 0, "cadence": payload.recurrence, "weekly_day": weekly_day, "next_index": 1, "next_due_date": next_due.isoformat(), "priority": payload.priority, "note": task["note"], "active": True, "paused": False})
     data["tasks"].append(task)
     save_data(data)
-    email_sent = send_email(assignee["email"], f"New family task: {task['title']}", f"{member['name']} assigned you a task.\n\n{task['title']}\nDue: {task['due_date'] or 'No due date'}\n\nOpen your family dashboard to see the details.")
-    return {"task": public_task(task, data["members"]), "email_sent": email_sent}
+    return {"task": public_task(task, data["members"])}
+
+
+@app.patch("/api/recurring/{series_id}")
+def update_recurring_series(series_id: str, payload: RecurringSeriesAction, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    series = next((item for item in data.get("recurring_series", []) if item["id"] == series_id), None)
+    if not series:
+        raise HTTPException(status_code=404, detail="Recurring task not found")
+    if series.get("created_by") != member["id"]:
+        raise HTTPException(status_code=403, detail="Only the person who created this recurring task can manage it")
+    if not series.get("active", True):
+        raise HTTPException(status_code=409, detail="This recurring schedule has already been stopped")
+    if payload.action == "pause":
+        series["paused"] = True
+        series["paused_at"] = household_today(data).isoformat()
+    else:
+        series["paused"] = False
+        series.pop("paused_at", None)
+        anchor = date.fromisoformat(series["anchor_date"])
+        anchor_index = int(series.get("anchor_index", 0))
+        next_index = int(series.get("next_index", 1))
+        today = household_today(data)
+        while recurring_date(anchor, series["cadence"], next_index - anchor_index) <= today:
+            next_index += 1
+        series["next_index"] = next_index
+        series["next_due_date"] = recurring_date(anchor, series["cadence"], next_index - anchor_index).isoformat()
+    save_home(data)
+    return {"ok": True, "paused": series["paused"]}
 
 
 @app.delete("/api/recurring/{series_id}")
@@ -979,10 +1160,16 @@ def update_task(task_id: str, payload: TaskUpdate, request: Request) -> dict[str
     if payload.status == "done" and previous_status != "done":
         task.setdefault("original_assignee_id", task["assignee_id"])
         task["completed_by"] = member["id"]
+        task["completed_by_name"] = member["name"]
+        task["completed_at"] = now_iso()
         task["assignee_id"] = member["id"]
+        record_task_event(task, "completed", member)
     elif previous_status == "done" and payload.status != "done":
+        record_task_event(task, "reopened", member)
         task["assignee_id"] = task.get("original_assignee_id", task["assignee_id"])
         task.pop("completed_by", None)
+        task.pop("completed_by_name", None)
+        task.pop("completed_at", None)
     task["status"] = payload.status
     task["updated_at"] = now_iso()
     save_data(data)
@@ -1000,14 +1187,42 @@ def edit_task(task_id: str, payload: TaskEdit, request: Request) -> dict[str, An
     assignee = next((m for m in data["members"] if m["id"] == payload.assignee_id), None)
     if not assignee:
         raise HTTPException(status_code=422, detail="Choose a member of this household")
-    task["title"] = payload.title.strip()
-    if task.get("status") != "done":
-        task["assignee_id"] = payload.assignee_id
-    task["original_assignee_id"] = payload.assignee_id
-    task["due_date"] = payload.due_date.isoformat() if payload.due_date else None
-    task["priority"] = payload.priority
-    task["note"] = payload.note.strip()
-    task["updated_at"] = now_iso()
+    recurring_id = task.get("recurrence_id")
+    series = next((item for item in data.get("recurring_series", []) if item["id"] == recurring_id), None) if recurring_id else None
+    edit_future = bool(series and payload.edit_scope == "future")
+    due = payload.due_date if not recurring_id else payload.due_date or (date.fromisoformat(task["due_date"]) if task.get("due_date") else None)
+    if edit_future and series and series.get("cadence") == "weekly" and due:
+        weekday = payload.weekly_day if payload.weekly_day is not None else due.weekday()
+        due = first_date_for_weekday(due, weekday)
+    else:
+        weekday = due.weekday() if due and series and series.get("cadence") == "weekly" else None
+
+    targets = [task]
+    if edit_future and series:
+        occurrence_index = int(task.get("recurrence_index", 0))
+        if not due:
+            raise HTTPException(status_code=422, detail="A recurring task needs a due date")
+        series.update({"title": payload.title.strip(), "assignee_id": payload.assignee_id, "priority": payload.priority, "note": payload.note.strip(), "anchor_date": due.isoformat(), "anchor_index": occurrence_index, "weekly_day": weekday})
+        targets = [item for item in data["tasks"] if item.get("recurrence_id") == recurring_id and int(item.get("recurrence_index", -1)) >= occurrence_index]
+        next_index = max(int(series.get("next_index", occurrence_index + 1)), occurrence_index + 1)
+        series["next_index"] = next_index
+        series["next_due_date"] = recurring_date(due, series["cadence"], next_index - occurrence_index).isoformat()
+
+    for target in targets:
+        index = int(target.get("recurrence_index", 0)) if edit_future else 0
+        target["title"] = payload.title.strip()
+        if target.get("status") != "done":
+            target["assignee_id"] = payload.assignee_id
+        target["original_assignee_id"] = payload.assignee_id
+        if edit_future and series and due:
+            target_due = recurring_date(due, series["cadence"], index - int(task.get("recurrence_index", 0)))
+            target["due_date"] = target_due.isoformat()
+            target["weekly_day"] = weekday
+        elif target is task:
+            target["due_date"] = due.isoformat() if due else None
+        target["priority"] = payload.priority
+        target["note"] = payload.note.strip()
+        target["updated_at"] = now_iso()
     save_data(data)
     return {"task": public_task(task, data["members"])}
 
@@ -1024,58 +1239,3 @@ def delete_task(task_id: str, request: Request) -> dict[str, bool]:
     save_data(data)
     return {"ok": True}
 
-
-def send_email(to: str, subject: str, body: str) -> bool:
-    api_key = os.getenv("RESEND_API_KEY")
-    sender = os.getenv("EMAIL_FROM")
-    if not to or not api_key or not sender:
-        return False
-    payload = json.dumps({"from": sender, "to": [to], "subject": subject, "text": body}).encode()
-    request = urllib.request.Request("https://api.resend.com/emails", data=payload, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as result:
-            return 200 <= result.status < 300
-    except (urllib.error.URLError, TimeoutError):
-        return False
-
-
-@app.post("/api/jobs/reminders")
-def reminders(authorization: str | None = Header(default=None)) -> dict[str, int]:
-    job_token = os.getenv("REMINDER_JOB_TOKEN")
-    if not job_token or not hmac.compare_digest(authorization or "", f"Bearer {job_token}"):
-        raise HTTPException(status_code=403, detail="Not authorized")
-    if not os.getenv("RESEND_API_KEY") or not os.getenv("EMAIL_FROM"):
-        return {"sent": 0}
-    data = load_data()
-    today = household_today(data)
-    sent = 0
-    for task in data["tasks"]:
-        if task["status"] == "done" or not task.get("due_date"):
-            continue
-        due = date.fromisoformat(task["due_date"])
-        days = (due - today).days
-        if 0 < days <= 3 and "three-days" not in task.get("reminders_sent", []):
-            kind = "three-days"
-            subject = f"Coming up in {days} days: {task['title']}"
-        elif days == 0:
-            kind = f"due-today:{today.isoformat()}"
-            subject = f"Due today: {task['title']}"
-        elif days < 0 and (not task.get("last_overdue_reminder") or (today - date.fromisoformat(task["last_overdue_reminder"])).days >= 7):
-            kind = f"overdue-week:{today.isoformat()}"
-            subject = f"Weekly reminder: {task['title']} is overdue"
-        else:
-            continue
-        if kind in task.get("reminders_sent", []):
-            continue
-        assignee = next((m for m in data["members"] if m["id"] == task["assignee_id"]), None)
-        detail = f"due in {days} days" if days > 0 else "due today" if days == 0 else f"{abs(days)} days overdue"
-        if assignee and send_email(assignee["email"], subject, f"{task['title']} is {detail}.\n\nOpen your family dashboard to update its status."):
-            if kind == "overdue-week":
-                task["last_overdue_reminder"] = today.isoformat()
-            else:
-                task.setdefault("reminders_sent", []).append(kind)
-            task["updated_at"] = now_iso()
-            sent += 1
-    if sent:
-        save_data(data)
-    return {"sent": sent}

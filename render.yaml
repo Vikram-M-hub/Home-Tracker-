@@ -14,11 +14,5 @@ services:
         value: "true"
       - key: DATABASE_URL
         sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
       - key: PUBLIC_URL
         sync: false
-      - key: REMINDER_JOB_TOKEN
-        generateValue: true

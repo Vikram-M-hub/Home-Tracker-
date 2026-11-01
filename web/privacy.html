@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f7fb">
+  <title>Privacy policy — Together</title>
+  <style>
+    :root{font-family:Arial,sans-serif;color:#15233f;background:#f4f7fb;line-height:1.65}*{box-sizing:border-box}body{margin:0}.top{padding:22px max(22px,calc((100vw - 900px)/2));font-size:20px;font-weight:700;background:#fff;border-bottom:1px solid #e2e9f4}.wrap{max-width:900px;margin:34px auto;padding:36px;background:#fff;border:1px solid #e2e9f4;border-radius:22px;box-shadow:0 16px 44px #15233f0a}h1{font-size:34px;line-height:1.2;margin:4px 0 12px}h2{font-size:20px;margin:30px 0 8px}p,li{color:#53627d}a{color:#2459d3}.date{color:#77849c;font-size:14px}.callout{padding:14px 16px;border-radius:12px;background:#f2f6ff;border:1px solid #dce7ff}.back{display:inline-flex;margin-top:20px;font-weight:700;text-decoration:none}@media(max-width:600px){.top{padding:18px}.wrap{margin:16px;padding:24px 20px;border-radius:16px}h1{font-size:29px}}
+  </style>
+</head>
+<body>
+  <header class="top">Together</header>
+  <main class="wrap">
+    <div class="date">Effective November 1, 2026</div>
+    <h1>Privacy policy</h1>
+    <p>This notice explains what Together — Home, in sync stores and how the family dashboard uses it.</p>
+    <div class="callout"><strong>In short:</strong> Together stores the information needed to run a shared household task list. It does not sell personal information, show ads, or send email notifications. New profile forms do not ask for email addresses.</div>
+
+    <h2>Information stored</h2>
+    <ul>
+      <li><strong>Home details:</strong> household name, home username, timezone, and recovery settings.</li>
+      <li><strong>Profile details:</strong> profile names, organizer/member roles, and profile setup status.</li>
+      <li><strong>PIN and recovery protection:</strong> home and profile PINs are stored as salted PBKDF2-SHA256 hashes, not as readable PINs. Recovery codes and setup links are stored as hashes.</li>
+      <li><strong>Task information:</strong> task names and descriptions, assignees, due dates, priority, status, recurring schedule, creator, and completion/reopening history.</li>
+      <li><strong>Session and device data:</strong> a secure session cookie is used to keep a signed-in profile connected. The selected color theme is saved in the browser’s local storage.</li>
+    </ul>
+    <p>Email notifications have been removed. Email addresses that were entered before that change may remain in older household records, but Together no longer uses them to send messages or returns them in profile responses. Ask the household organizer to remove the profile if you want those legacy records removed.</p>
+
+    <h2>How information is used</h2>
+    <p>Information is used to authenticate household members, assign and display tasks, show task status and completion history, manage recurring schedules, support profile/home recovery, and protect the service against repeated PIN guessing.</p>
+
+    <h2>Where information is processed</h2>
+    <p>The website runs on Render and stores household records in a Neon-hosted PostgreSQL database. The site loads its fonts from Google Fonts; when those fonts are requested, your browser connects to Google’s font service. The service does not currently include advertising or analytics SDKs.</p>
+
+    <h2>Retention and deletion</h2>
+    <p>Household information remains stored until the organizer deletes the home. A profile can be deleted by its owner, and organizers can delete another profile. When a profile is removed, shared task records may be retained for household continuity, while the removed person’s name in creator/completion attribution is replaced with “Former member.” The organizer chooses whether assigned tasks are reassigned or deleted. Deleting a home removes its profiles, tasks, and recurring schedules.</p>
+    <p>To delete a profile or home, open the dashboard, sign in, tap your profile menu, and choose the relevant delete option. The public <a href="/data-deletion">data deletion page</a> explains these steps. If access is lost, use the home recovery options first.</p>
+
+    <h2>Security</h2>
+    <p>Traffic to the hosted website uses HTTPS. PINs and recovery values are hashed before storage. Do not share your PIN, recovery code, or a private setup link. Anyone who receives a setup link can activate that profile until the link expires or is replaced.</p>
+
+    <h2>Children and family profiles</h2>
+    <p>Together is a household organizer, not a service designed specifically for children. A household organizer should decide which family members may use the service and what task details are appropriate to add.</p>
+
+    <h2>Privacy questions</h2>
+    <p>Together currently provides self-service help and account controls, but does not have a separate support inbox. Use the <a href="/data-deletion">data deletion page</a> for deletion steps and the profile menu’s Help &amp; how to guide for common questions. A dedicated privacy contact will be added before public Play Store release.</p>
+    <a class="back" href="/">← Back to Together</a>
+  </main>
+</body>
+</html>

@@ -1,0 +1,23 @@
+.completed-section{margin:12px 0 22px;border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden}
+.completed-section>summary,.older-completed>summary{display:flex;align-items:center;gap:10px;padding:15px 17px;cursor:pointer;list-style:none;font-weight:700;color:var(--ink-2)}
+.completed-section>summary::-webkit-details-marker,.older-completed>summary::-webkit-details-marker{display:none}
+.completed-section>summary::before,.older-completed>summary::before{content:"＋";display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:var(--blue-soft);color:var(--blue-strong);font-size:15px}
+.completed-section[open]>summary::before,.older-completed[open]>summary::before{content:"−"}
+.completed-section>summary strong,.older-completed>summary strong{margin-left:auto;padding:3px 9px;border-radius:99px;background:var(--surface-2);font-size:11px;color:var(--muted)}
+.completed-section>summary small{font-weight:500;color:var(--muted)}
+.completed-section-body{padding:0 12px 12px}
+.completed-section-body>.task-card{margin-bottom:8px}
+.older-completed{margin-top:10px;border-top:1px solid var(--line)}
+.older-completed>summary{padding:14px 5px 10px;font-size:12px}
+.older-completed-list{padding:0 0 2px}
+.completion-caption{display:block;margin-top:5px;font-size:11px;color:var(--muted)}
+.completion-event{display:flex;gap:8px;align-items:flex-start;padding:5px 0;color:var(--muted);font-size:12px}
+.completion-event strong{color:var(--ink-2)}
+.help-intro{color:var(--muted);margin:-5px 0 16px}
+.help-step{display:grid;grid-template-columns:30px 1fr;gap:11px;padding:14px 0;border-top:1px solid var(--line)}
+.help-step>span{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--blue-soft);color:var(--blue-strong);font-weight:800}
+.help-step h3{font-size:14px;margin:1px 0 4px;color:var(--ink-2)}
+.help-step p{font-size:12px;line-height:1.6;color:var(--muted);margin:0}
+.help-footer{display:flex;gap:18px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:14px;margin-top:4px}
+.help-footer a{font-size:12px;font-weight:700;color:var(--blue-strong);text-decoration:none}
+@media(max-width:600px){.completed-section>summary{gap:8px;padding:13px}.completed-section>summary small{display:none}.help-step{padding:12px 0}}

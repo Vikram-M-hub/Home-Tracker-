@@ -25,7 +25,7 @@ function profileCard(member) {
 function renderSetupProfiles() {
   const host = $("#setup-members");
   const index=host.children.length;
-  host.insertAdjacentHTML("beforeend", `<div class="profile-entry"><div class="profile-entry-head"><span class="entry-number">${index + 1}</span><strong>${index===0?"You · organizer":"Family member"}</strong>${index ? '<button class="remove-profile" type="button" aria-label="Remove member">×</button>' : ""}</div><label>Name<input name="member_name" required maxlength="60" placeholder="e.g. Sam"></label><label>Email <span class="optional">Optional · for email alerts later</span><input name="member_email" type="email" maxlength="254" placeholder="sam@example.com"></label></div>`);
+  host.insertAdjacentHTML("beforeend", `<div class="profile-entry"><div class="profile-entry-head"><span class="entry-number">${index + 1}</span><strong>${index===0?"You · organizer":"Family member"}</strong>${index ? '<button class="remove-profile" type="button" aria-label="Remove member">×</button>' : ""}</div><label>Name<input name="member_name" required maxlength="60" placeholder="e.g. Sam"></label></div>`);
   const last = host.lastElementChild; $(".remove-profile", last)?.addEventListener("click", () => last.remove());
 }
 async function start() {
@@ -36,9 +36,9 @@ async function start() {
   }
   if (previewMode) {
     const people = [
-      {id:"sam",name:"Sam Sharma",email:"sam@example.com",role:"admin",activated:true},
-      {id:"asha",name:"Asha Sharma",email:"asha@example.com",role:"member",activated:true},
-      {id:"raj",name:"Raj Sharma",email:"raj@example.com",role:"member",activated:true},
+      {id:"sam",name:"Sam Sharma",role:"admin",activated:true},
+      {id:"asha",name:"Asha Sharma",role:"member",activated:true},
+      {id:"raj",name:"Raj Sharma",role:"member",activated:true},
     ];
     state.tasks = [
       {id:"t1",title:"Pick up the documents from the bank",assignee_id:"sam",original_assignee_id:"sam",assignee:people[0],due_date:new Date(Date.now()+86400000).toISOString().slice(0,10),priority:"high",note:"Ask for the stamped copy at the counter.",status:"todo"},
@@ -91,10 +91,10 @@ $("#home-add-member-form").addEventListener("submit",async e=>{
   e.preventDefault();const form=e.currentTarget,f=new FormData(form),button=$("[type=submit]",form),error=$("#home-add-member-error");
   error.textContent="";button.disabled=true;
   try{
-    const result=await api("/api/homes/current/profiles/members",{method:"POST",body:JSON.stringify({organizer_id:f.get("organizer_id"),pin:f.get("pin"),name:f.get("name"),email:f.get("email")})});
+    const result=await api("/api/homes/current/profiles/members",{method:"POST",body:JSON.stringify({organizer_id:f.get("organizer_id"),pin:f.get("pin"),name:f.get("name")})});
     form.reset();$("#home-add-member-dialog").close();
     await renderHomeProfiles(await api("/api/homes/current/profiles"));
-    await openInviteLink(result.invite_url,result.member.name,result.invitation_sent);
+    await openInviteLink(result.invite_url,result.member.name);
   }catch(err){error.textContent=err.message;}finally{button.disabled=false;}
 });
 $("#forgot-home-button").addEventListener("click",()=>{$("#recover-home-code-error").textContent="";$("#recover-home-organizer-error").textContent="";$("#home-recovery-dialog").showModal();});
@@ -237,6 +237,7 @@ function populateMembers() {
   $("#recovery-options-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#home-credentials-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#delete-home-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
+  $("#export-home-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   $("#delete-profile-button").classList.toggle("hidden", previewMode);
   $("#delete-member-button").classList.toggle("hidden", state.me.role !== "admin" || previewMode);
   renderMemberNotices();
@@ -249,15 +250,15 @@ function renderMemberNotices(){
   $$(".send-invite",host).forEach(button=>button.addEventListener("click",async()=>{
     if(previewMode){showToast("Sample preview only");return;}
     button.disabled=true;
-    try{const result=await api(`/api/members/${button.dataset.member}/invite`,{method:"POST"});const index=state.members.findIndex(m=>m.id===result.member.id);state.members[index]=result.member;populateMembers();openInviteLink(result.invite_url,result.member.name,result.invitation_sent);}
+    try{const result=await api(`/api/members/${button.dataset.member}/invite`,{method:"POST"});const index=state.members.findIndex(m=>m.id===result.member.id);state.members[index]=result.member;populateMembers();openInviteLink(result.invite_url,result.member.name);}
     catch(error){showToast(error.message);}finally{button.disabled=false;}
   }));
 }
-async function openInviteLink(url,name,emailSent=false){
+async function openInviteLink(url,name){
   $("#invite-link-member").textContent=name;
   $("#invite-url").value=url;
   $("#invite-link-dialog").showModal();
-  try{await navigator.clipboard.writeText(url);showToast(emailSent?"Setup email sent · link copied":"Link copied · share it privately by WhatsApp or text");}
+  try{await navigator.clipboard.writeText(url);showToast("Link copied · share it privately by WhatsApp or text");}
   catch{const input=$("#invite-url");input.focus();input.select();showToast("Setup link ready · copy it and share privately");}
 }
 function dueLabel(task) {
@@ -275,7 +276,22 @@ function taskCard(task, family = false) {
   const nextStatus = {todo:"in_progress",in_progress:"done",done:"todo"}[task.status];
   const actionText = {todo:"Start task",in_progress:"Mark done",done:"Reopen task"}[task.status];
   const overdue = task.status !== "done" && task.due_date && new Date(`${task.due_date}T12:00:00`) < new Date(new Date().setHours(0,0,0,0));
-  return `<article class="task-card ${task.status === "done" ? "is-done" : ""}"><button class="task-check ${task.status === "done" ? "checked" : ""}" data-task="${escapeHtml(task.id)}" data-next="${nextStatus}" aria-label="${actionText}" title="${actionText}" type="button">${task.status === "done" ? "✓" : task.status === "in_progress" ? "◷" : ""}</button><div class="task-main"><div class="task-title-row"><button class="task-title-button" data-task-detail="${escapeHtml(task.id)}" type="button"><h3>${escapeHtml(task.title)}</h3></button>${task.priority === "high" ? '<span class="priority-badge">Important</span>' : ""}</div>${task.note ? `<p class="task-note">${escapeHtml(task.note)}</p>` : ""}<div class="task-meta"><span class="due-pill ${overdue ? "overdue" : ""}"><span>◷</span>${dueLabel(task)}</span>${family ? `<span class="assignee"><span class="avatar avatar-xs">${escapeHtml(initials(task.assignee?.name || "?"))}</span>${escapeHtml(task.assignee?.name || "Unassigned")}</span>` : ""}<button class="task-details-trigger" data-task-detail="${escapeHtml(task.id)}" type="button">Details</button></div></div><span class="status-pill status-${task.status}">${statusText}</span></article>`;
+  const completedBy=task.completed_by_name||state.members.find(member=>member.id===task.completed_by)?.name;
+  const completedAt=task.completed_at?new Intl.DateTimeFormat(undefined,{month:"short",day:"numeric",year:"numeric"}).format(new Date(task.completed_at)):"";
+  return `<article class="task-card ${task.status === "done" ? "is-done" : ""}"><button class="task-check ${task.status === "done" ? "checked" : ""}" data-task="${escapeHtml(task.id)}" data-next="${nextStatus}" aria-label="${actionText}" title="${actionText}" type="button">${task.status === "done" ? "✓" : task.status === "in_progress" ? "◷" : ""}</button><div class="task-main"><div class="task-title-row"><button class="task-title-button" data-task-detail="${escapeHtml(task.id)}" type="button"><h3>${escapeHtml(task.title)}</h3></button>${task.priority === "high" ? '<span class="priority-badge">Important</span>' : ""}</div>${task.note ? `<p class="task-note">${escapeHtml(task.note)}</p>` : ""}<div class="task-meta"><span class="due-pill ${overdue ? "overdue" : ""}"><span>◷</span>${dueLabel(task)}</span>${family ? `<span class="assignee"><span class="avatar avatar-xs">${escapeHtml(initials(task.assignee?.name || "?"))}</span>${escapeHtml(task.assignee?.name || "Unassigned")}</span>` : ""}<button class="task-details-trigger" data-task-detail="${escapeHtml(task.id)}" type="button">Details</button></div>${task.status==="done"?`<small class="completion-caption">Completed${completedBy?` by ${escapeHtml(completedBy)}`:""}${completedAt?` · ${completedAt}`:""}</small>`:""}</div><span class="status-pill status-${task.status}">${statusText}</span></article>`;
+}
+function renderTaskCards(tasks,family=false,openCompleted=false){
+  const completed=tasks.filter(task=>task.status==="done");
+  const active=tasks.filter(task=>task.status!=="done");
+  const cutoff=Date.now()-30*86400000;
+  const older=completed.filter(task=>{const stamp=Date.parse(task.completed_at||task.updated_at||"");return Number.isFinite(stamp)&&stamp<cutoff;});
+  const oldIds=new Set(older.map(task=>task.id));
+  const recent=completed.filter(task=>!oldIds.has(task.id));
+  let html=active.map(task=>taskCard(task,family)).join("");
+  if(completed.length){
+    html+=`<details class="completed-section" ${openCompleted?"open":""}><summary><span>Completed tasks</span><strong>${completed.length}</strong><small>Older than 30 days are archived</small></summary><div class="completed-section-body">${recent.map(task=>taskCard(task,family)).join("")}${older.length?`<details class="older-completed"><summary><span>Older completed</span><strong>${older.length}</strong></summary><div class="older-completed-list">${older.map(task=>taskCard(task,family)).join("")}</div></details>`:""}</div></details>`;
+  }
+  return html;
 }
 function matchesTaskSearch(task, query) {
   if (!query) return true;
@@ -301,7 +317,7 @@ function renderTasks() {
   });
   $("#my-task-summary").textContent = `${myTasks.length} ${myTasks.length === 1 ? "task" : "tasks"}`;
   $$("[data-my-filter]").forEach(button => button.classList.toggle("selected", button.dataset.myFilter === state.myFilter));
-  $("#my-task-list").innerHTML = myTasks.map(t => taskCard(t)).join("");
+  $("#my-task-list").innerHTML = renderTaskCards(myTasks,false,state.myFilter==="done"||Boolean(state.mySearch));
   const myNoResults = Boolean(state.mySearch) && myTasks.length === 0;
   $("#my-empty").classList.toggle("hidden", myTasks.length !== 0 || myNoResults);
   $("#my-no-results").classList.toggle("hidden", !myNoResults);
@@ -314,7 +330,7 @@ function renderTasks() {
     const matchesFilter=state.familyFilter==="all"||(state.familyFilter==="due_week"?Boolean(t.due_date&&t.due_date>=weekStart&&t.due_date<=weekEnd):t.status===state.familyFilter);
     return matchesFilter&&(state.memberFilter==="all"||t.assignee_id===state.memberFilter)&&matchesTaskSearch(t,state.familySearch);
   });
-  $("#family-task-list").innerHTML = filtered.map(t => taskCard(t, true)).join("");
+  $("#family-task-list").innerHTML = renderTaskCards(filtered,true,state.familyFilter==="done"||Boolean(state.familySearch));
   const familyEmpty=state.tasks.length===0&&state.familyFilter==="all"&&state.memberFilter==="all"&&!state.familySearch;
   const familyNoResults = filtered.length===0&&!familyEmpty;
   $("#family-empty").classList.toggle("hidden", !familyEmpty);
@@ -353,14 +369,27 @@ function openTaskDetails(taskId){
   $("#detail-task-priority").textContent={low:"Whenever",normal:"Normal",high:"Important"}[task.priority]||"Normal";
   const cadenceLabels={daily:"Every day",weekly:"Every week",monthly:"Every month",yearly:"Every year"};
   $("#detail-task-recurrence-wrap").classList.toggle("hidden",!task.recurrence);
-  $("#detail-task-recurrence").textContent=cadenceLabels[task.recurrence]||"";
+  const weekdayLabels=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const weeklyDay=task.weekly_day??(task.due_date?((new Date(`${task.due_date}T12:00:00`).getDay()+6)%7):null);
+  $("#detail-task-recurrence").textContent=task.recurrence?(cadenceLabels[task.recurrence]+(task.recurrence==="weekly"&&weeklyDay!==null?` on ${weekdayLabels[weeklyDay]}`:""))+(task.recurrence_paused?" · Paused":""):"";
   $("#detail-task-status").textContent={todo:"To do",in_progress:"In progress",done:"Done"}[task.status]||task.status;
   $("#detail-task-note").textContent=task.note||"No description added.";
   $("#detail-task-creator").textContent=task.creator?.name||state.members.find(m=>m.id===task.created_by)?.name||"Unknown";
   $("#detail-task-created").textContent=task.created_at?new Intl.DateTimeFormat(undefined,{year:"numeric",month:"long",day:"numeric"}).format(new Date(task.created_at)):"—";
+  const history=task.completion_history||[];
+  $("#detail-completion-history").classList.toggle("hidden",!history.length&&task.status!=="done");
+  const historyHtml=history.length?history.slice().reverse().map(event=>{
+    const action=event.action==="reopened"?"Reopened":"Completed";
+    const when=event.at?new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(event.at)):"time unavailable";
+    return `<div class="completion-event"><span>•</span><span><strong>${action}</strong> by ${escapeHtml(event.member_name||"Family member")} · ${escapeHtml(when)}</span></div>`;
+  }).join(""):"";
+  const legacyCompletionHtml=task.status==="done"?`<div class="completion-event"><span>•</span><span>Completed${task.completed_by_name?` by <strong>${escapeHtml(task.completed_by_name)}</strong>`:""}${task.completed_at?` · ${escapeHtml(new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(task.completed_at)))}`:" · date unavailable for this older task"}</span></div>`:"";
+  $("#detail-completion-events").innerHTML=historyHtml||legacyCompletionHtml;
   const isCreator=task.created_by===state.me.id;
   $("#task-owner-actions").classList.toggle("hidden",!isCreator);
-  $("#stop-recurring-button").classList.toggle("hidden",!task.recurrence_id);
+  $("#stop-recurring-button").classList.toggle("hidden",!task.recurrence_id||task.recurrence_stopped);
+  $("#pause-recurring-button").classList.toggle("hidden",!task.recurrence_id||task.recurrence_stopped);
+  $("#pause-recurring-button").textContent=task.recurrence_paused?"Resume recurring":"Pause recurring";
   $("#edit-task-title").value=task.title;
   const editAssignee=task.status==="done"?(task.original_assignee_id||task.assignee_id):task.assignee_id;
   $("#edit-task-assignee-label").textContent=task.status==="done"?"Assigned to when reopened":"Assigned to";
@@ -368,6 +397,10 @@ function openTaskDetails(taskId){
   $("#edit-task-due").value=task.due_date||"";
   $("#edit-task-note").value=task.note||"";
   $$("#task-edit-form [name=priority]").forEach(input=>input.checked=input.value===task.priority);
+  $("#recurrence-edit-scope-wrap").classList.toggle("hidden",!task.recurrence_id);
+  $("#task-edit-form [name=edit_scope]").value="this";
+  $("#edit-weekly-day-wrap").classList.toggle("hidden",true);
+  $("#task-edit-form [name=weekly_day]").value=String(weeklyDay??0);
   showTaskDetailMode(false);
   $("#task-detail-dialog").showModal();
 }
@@ -403,14 +436,31 @@ function showTaskDialog(mode="once"){
   $("#recurrence-field").classList.toggle("hidden",!recurring);
   $("#task-form [name=due_date]").required=recurring;
   $("#task-form [name=recurrence]").disabled=!recurring;
+  const weekly=recurring&&$("#task-form [name=recurrence]").value==="weekly";
+  $("#weekly-day-field").classList.toggle("hidden",!weekly);
+  const due=$("#task-form [name=due_date]").value;
+  if(due)$("#task-form [name=weekly_day]").value=String((new Date(`${due}T12:00:00`).getDay()+6)%7);
   $("#task-dialog").showModal();$("#task-form [name=title]").focus();
 }
 function openTaskDialog(){showTaskDialog("once");}
 
 $("#add-profile").addEventListener("click", () => renderSetupProfiles());
+$("#task-form [name=recurrence]").addEventListener("change",e=>{
+  const weekly=state.createMode==="recurring"&&e.target.value==="weekly";
+  $("#weekly-day-field").classList.toggle("hidden",!weekly);
+  const due=$("#task-form [name=due_date]").value;
+  if(weekly&&due)$("#task-form [name=weekly_day]").value=String((new Date(`${due}T12:00:00`).getDay()+6)%7);
+});
+$("#task-form [name=due_date]").addEventListener("change",e=>{
+  if($("#task-form [name=recurrence]").value==="weekly"&&e.target.value)$("#task-form [name=weekly_day]").value=String((new Date(`${e.target.value}T12:00:00`).getDay()+6)%7);
+});
+$("#task-edit-form [name=edit_scope]").addEventListener("change",e=>{
+  const task=state.tasks.find(item=>item.id===state.activeTaskId);
+  $("#edit-weekly-day-wrap").classList.toggle("hidden",!(task?.recurrence==="weekly"&&e.target.value==="future"));
+});
 $("#setup-form").addEventListener("submit", async e => {
   e.preventDefault(); const form = e.currentTarget; const entries = $$(".profile-entry", form);
-  const members = entries.map(entry => ({name:$("[name=member_name]",entry).value, email:$("[name=member_email]",entry).value}));
+  const members = entries.map(entry => ({name:$("[name=member_name]",entry).value}));
   const submit = $("[type=submit]",form); submit.disabled = true; submit.textContent = "Setting up your home…";
   try { const data = await api("/api/setup", {method:"POST",body:JSON.stringify({household_name:$('[name=household_name]',form).value,members,organizer_pin:$("#organizer-pin").value})}); const me = await api("/api/me"); openDashboard(me); showToast(data.invites_pending?`Welcome! Get setup links for ${data.invites_pending} family member(s) on the Family board.`:`Welcome to ${data.household.name}!`); }
   catch(e) { showToast(e.message); submit.disabled = false; submit.innerHTML = 'Create our family space <span>→</span>'; }
@@ -421,6 +471,14 @@ $("#login-form").addEventListener("submit", async e => {
   catch(error) { err.textContent = error.message; $("#login-pin").value = ""; $("#login-pin").focus(); }
 });
 function closeAccountMenu(){$("#account-menu").classList.add("hidden");$("#account-button").setAttribute("aria-expanded","false");}
+$("#help-menu-button").addEventListener("click",()=>{closeAccountMenu();$("#help-dialog").showModal();});
+$("#close-help").addEventListener("click",()=>$("#help-dialog").close());
+$("#help-dialog").addEventListener("click",e=>{if(e.target===$("#help-dialog"))$("#help-dialog").close();});
+$("#export-home-button").addEventListener("click",async()=>{
+  closeAccountMenu();
+  try{const response=await fetch("/api/homes/current/export",{credentials:"same-origin"});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"Could not download household data");}const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="together-home-export.json";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);showToast("Home data downloaded. Keep the file somewhere private.");}
+  catch(error){showToast(error.message);}
+});
 function updateDeleteProfileTransfer(){
   const targetId=$("#delete-profile-target").value;
   const transfer=state.isPrimaryOrganizer&&targetId===state.me.id;
@@ -492,8 +550,8 @@ $("#sign-out-home").addEventListener("click",async()=>{
   catch(error){showToast(error.message);}
 });
 $("#task-form").addEventListener("submit", async e => {
-  e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note"),recurrence:f.get("recurrence")||null};
-  try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();$("#recurrence-field").classList.add("hidden");$("#task-form [name=due_date]").required=false;$("#task-form [name=recurrence]").disabled=true;showToast("Task added to the family list");return;} const result=await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; $("#recurrence-field").classList.add("hidden");$("#task-form [name=due_date]").required=false;$("#task-form [name=recurrence]").disabled=true;await loadTasks(); showToast(payload.recurrence?"Recurring task added to the calendar":result.email_sent?"Task added · assignment email sent":"Task added · email alerts need setup"); }
+  e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const recurrence=f.get("recurrence")||null;const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note"),recurrence,weekly_day:recurrence==="weekly"?Number(f.get("weekly_day")):null};
+  try { if(previewMode){const assignee=state.members.find(m=>m.id===payload.assignee_id);state.tasks.unshift({id:crypto.randomUUID(),...payload,status:"todo",assignee,created_by:state.me.id,creator:{id:state.me.id,name:state.me.name},original_assignee_id:payload.assignee_id});renderTasks();$("#task-dialog").close();form.reset();$("#recurrence-field").classList.add("hidden");$("#weekly-day-field").classList.add("hidden");$("#task-form [name=due_date]").required=false;$("#task-form [name=recurrence]").disabled=true;showToast("Task added to the family list");return;} await api("/api/tasks",{method:"POST",body:JSON.stringify(payload)}); $("#task-dialog").close(); form.reset(); $("#task-form [name=priority][value=normal]").checked=true; $("#recurrence-field").classList.add("hidden");$("#weekly-day-field").classList.add("hidden");$("#task-form [name=due_date]").required=false;$("#task-form [name=recurrence]").disabled=true;await loadTasks(); showToast(payload.recurrence?"Recurring task added to the calendar":"Task added to the family list"); }
   catch(error) { showToast(error.message); }
 });
 $("#close-dialog").addEventListener("click",()=>$("#task-dialog").close());
@@ -505,7 +563,7 @@ $("#task-detail-dialog").addEventListener("click",e=>{if(e.target===$("#task-det
 $("#task-edit-form").addEventListener("submit",async e=>{
   e.preventDefault();
   const task=state.tasks.find(item=>item.id===state.activeTaskId);if(!task||task.created_by!==state.me.id){showToast("Only the task creator can edit this task");return;}
-  const f=new FormData(e.currentTarget);const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note")};
+  const f=new FormData(e.currentTarget);const payload={title:f.get("title"),assignee_id:f.get("assignee_id"),due_date:f.get("due_date")||null,priority:f.get("priority"),note:f.get("note"),edit_scope:f.get("edit_scope")||"this",weekly_day:f.get("edit_scope")==="future"?Number(f.get("weekly_day")):null};
   const button=$("[type=submit]",e.currentTarget);button.disabled=true;
   try{
     if(previewMode){const wasDone=task.status==="done",currentAssignee=task.assignee_id,completedBy=task.completed_by;Object.assign(task,payload,{original_assignee_id:payload.assignee_id});if(wasDone)task.assignee_id=completedBy||currentAssignee;task.assignee=state.members.find(m=>m.id===task.assignee_id);renderTasks();}
@@ -520,6 +578,12 @@ $("#task-delete-button").addEventListener("click",async()=>{
   try{if(previewMode){state.tasks=state.tasks.filter(item=>item.id!==task.id);renderTasks();}else{await api(`/api/tasks/${task.id}`,{method:"DELETE"});await loadTasks();}$("#task-detail-dialog").close();showToast("Task deleted");}
   catch(error){showToast(error.message);}
 });
+$("#pause-recurring-button").addEventListener("click",async()=>{
+  const task=state.tasks.find(item=>item.id===state.activeTaskId);if(!task?.recurrence_id||task.created_by!==state.me.id)return;
+  const action=task.recurrence_paused?"resume":"pause";
+  try{await api(`/api/recurring/${encodeURIComponent(task.recurrence_id)}`,{method:"PATCH",body:JSON.stringify({action})});await loadTasks();$("#task-detail-dialog").close();openTaskDetails(task.id);showToast(action==="pause"?"Recurring schedule paused":"Recurring schedule resumed");}
+  catch(error){showToast(error.message);}
+});
 $("#manage-members").addEventListener("click",()=>$("#member-dialog").showModal());
 $("#close-member-dialog").addEventListener("click",()=>$("#member-dialog").close());
 $("#member-dialog").addEventListener("click",e=>{if(e.target===$("#member-dialog")) $("#member-dialog").close();});
@@ -528,7 +592,7 @@ $("#invite-link-dialog").addEventListener("click",e=>{if(e.target===$("#invite-l
 $("#copy-invite-link").addEventListener("click",async()=>{const input=$("#invite-url");try{await navigator.clipboard.writeText(input.value);showToast("Link copied · share it privately");}catch{input.focus();input.select();document.execCommand("copy");showToast("Link copied · share it privately");}});
 $("#member-form").addEventListener("submit",async e=>{
   e.preventDefault(); const f=new FormData(e.currentTarget); const button=$("[type=submit]",e.currentTarget); button.disabled=true;
-  try { const data=previewMode?{member:{id:crypto.randomUUID(),name:f.get("name"),email:f.get("email"),role:"member",activated:true}}:await api("/api/members",{method:"POST",body:JSON.stringify({name:f.get("name"),email:f.get("email")})}); state.members.push(data.member); populateMembers(); $("#member-dialog").close(); e.currentTarget.reset(); showToast(`${data.member.name} added · get their setup link on the Family board`); }
+  try { const data=previewMode?{member:{id:crypto.randomUUID(),name:f.get("name"),role:"member",activated:true}}:await api("/api/members",{method:"POST",body:JSON.stringify({name:f.get("name")})}); state.members.push(data.member); populateMembers(); $("#member-dialog").close(); e.currentTarget.reset(); showToast(`${data.member.name} added · get their setup link on the Family board`); }
   catch(error){showToast(error.message);} finally{button.disabled=false;}
 });
 $("#add-task-top").addEventListener("click",e=>toggleAddTaskMenu(e.currentTarget));
