@@ -16,3 +16,7 @@ services:
         sync: false
       - key: PUBLIC_URL
         sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: DUE_NOTIFICATION_JOB_TOKEN
+        generateValue: true

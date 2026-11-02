@@ -23,15 +23,16 @@
       <li><strong>Profile details:</strong> profile names, organizer/member roles, and profile setup status.</li>
       <li><strong>PIN and recovery protection:</strong> home and profile PINs are stored as salted PBKDF2-SHA256 hashes, not as readable PINs. Recovery codes and setup links are stored as hashes.</li>
       <li><strong>Task information:</strong> task names and descriptions, assignees, due dates, priority, status, recurring schedule, creator, and completion/reopening history.</li>
-      <li><strong>Session and device data:</strong> a secure session cookie is used to keep a signed-in profile connected. The selected color theme is saved in the browser’s local storage.</li>
+      <li><strong>Session and device data:</strong> a secure session cookie is used to keep a signed-in profile connected. The selected color theme is saved in the browser’s local storage. The Android app temporarily caches the last task list for the signed-in profile to show it while syncing; this cache is removed when that profile signs out.</li>
+      <li><strong>Android push notifications:</strong> if a profile allows notifications, its Android installation’s Firebase Cloud Messaging token is stored with that profile so Together can send task-assignment and due-day alerts. The token is removed when that device signs out. Notification delivery is handled by Google Firebase Cloud Messaging.</li>
     </ul>
     <p>Email notifications have been removed. Email addresses that were entered before that change may remain in older household records, but Together no longer uses them to send messages or returns them in profile responses. Ask the household organizer to remove the profile if you want those legacy records removed.</p>
 
     <h2>How information is used</h2>
-    <p>Information is used to authenticate household members, assign and display tasks, show task status and completion history, manage recurring schedules, support profile/home recovery, and protect the service against repeated PIN guessing.</p>
+    <p>Information is used to authenticate household members, assign and display tasks, show task status and completion history, manage recurring schedules, send requested Android task notifications, support profile/home recovery, and protect the service against repeated PIN guessing.</p>
 
     <h2>Where information is processed</h2>
-    <p>The website runs on Render and stores household records in a Neon-hosted PostgreSQL database. The site loads its fonts from Google Fonts; when those fonts are requested, your browser connects to Google’s font service. The service does not currently include advertising or analytics SDKs.</p>
+    <p>The website runs on Render and stores household records in a Neon-hosted PostgreSQL database. Android push notification tokens and message delivery are processed by Google Firebase Cloud Messaging. The site loads its fonts from Google Fonts; when those fonts are requested, your browser connects to Google’s font service. The service does not currently include advertising or analytics SDKs.</p>
 
     <h2>Retention and deletion</h2>
     <p>Household information remains stored until the organizer deletes the home. A profile can be deleted by its owner, and organizers can delete another profile. When a profile is removed, shared task records may be retained for household continuity, while the removed person’s name in creator/completion attribution is replaced with “Former member.” The organizer chooses whether assigned tasks are reassigned or deleted. Deleting a home removes its profiles, tasks, and recurring schedules.</p>

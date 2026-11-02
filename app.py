@@ -5,6 +5,7 @@ import calendar
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -15,7 +16,7 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -27,6 +28,8 @@ TOKEN_SECRET = os.getenv("SESSION_SECRET", "local-development-key-change-before-
 TZ_NAME = os.getenv("HOUSEHOLD_TIMEZONE", "Asia/Kolkata")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 lock = threading.RLock()
+logger = logging.getLogger(__name__)
+_firebase_app = None
 login_attempts: dict[str, list[float]] = {}
 if os.getenv("K_SERVICE") and not os.getenv("SESSION_SECRET"):
     raise RuntimeError("Set SESSION_SECRET in Cloud Run before starting the service")
@@ -150,7 +153,7 @@ def all_homes() -> list[dict[str, Any]]:
     root = load_data()
     homes = list(root.get("homes", {}).values())
     if root.get("household"):
-        homes.append({k: root[k] for k in ("household", "members", "tasks", "recurring_series") if k in root})
+        homes.append({k: root[k] for k in ("household", "members", "tasks", "recurring_series", "_db_version") if k in root})
     return homes
 
 
@@ -468,6 +471,47 @@ class TaskEdit(BaseModel):
 
 class RecurringSeriesAction(BaseModel):
     action: str = Field(pattern=r"^(pause|resume)$")
+
+
+class DeviceTokenInput(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+
+
+def _firebase_messaging():
+    global _firebase_app
+    raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    if not raw:
+        return None
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, messaging
+        if _firebase_app is None:
+            account = json.loads(raw)
+            _firebase_app = firebase_admin.initialize_app(credentials.Certificate(account), name="together-push")
+        return messaging
+    except Exception:
+        logger.exception("Firebase push service is unavailable")
+        return None
+
+
+def send_member_push(data: dict[str, Any], member_id: str, title: str, body: str, task_id: str) -> bool:
+    messaging = _firebase_messaging()
+    if messaging is None:
+        return False
+    member = next((item for item in data.get("members", []) if item.get("id") == member_id), None)
+    if not member:
+        return False
+    sent = False
+    for token in list(member.get("device_tokens", [])):
+        try:
+            messaging.send(messaging.Message(
+                notification=messaging.Notification(title=title, body=body),
+                data={"task_id": task_id}, fid=token,
+            ), app=_firebase_app)
+            sent = True
+        except Exception:
+            logger.exception("Push delivery failed for a household device")
+    return sent
 
 
 class ProfileDeleteInput(BaseModel):
@@ -808,6 +852,25 @@ def me(request: Request) -> dict[str, Any]:
     return {"member": public_member(member), "household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]], "is_primary_organizer": member["id"] == primary_organizer_id(data), "primary_organizer_id": primary_organizer_id(data)}
 
 
+@app.post("/api/me/device-token")
+def register_device_token(payload: DeviceTokenInput, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    tokens = member.setdefault("device_tokens", [])
+    if payload.token not in tokens:
+        tokens.append(payload.token)
+        member["device_tokens"] = tokens[-10:]
+        save_home(data)
+    return {"ok": True}
+
+
+@app.delete("/api/me/device-token")
+def unregister_device_token(payload: DeviceTokenInput, request: Request) -> dict[str, bool]:
+    member, data = current_member(request)
+    member["device_tokens"] = [token for token in member.get("device_tokens", []) if token != payload.token]
+    save_home(data)
+    return {"ok": True}
+
+
 @app.post("/api/me/pin")
 def change_pin(payload: PinChangeInput, request: Request) -> dict[str, bool]:
     member, data = current_member(request)
@@ -1066,7 +1129,7 @@ def list_tasks(request: Request, assignee: str | None = None, status: str | None
 
 
 @app.post("/api/tasks")
-def create_task(payload: TaskInput, request: Request) -> dict[str, Any]:
+def create_task(payload: TaskInput, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
     member, data = current_member(request)
     assignee = next((m for m in data["members"] if m["id"] == payload.assignee_id), None)
     if not assignee:
@@ -1089,7 +1152,34 @@ def create_task(payload: TaskInput, request: Request) -> dict[str, Any]:
         data["recurring_series"].append({"id": series_id, "title": task["title"], "assignee_id": payload.assignee_id, "created_by": member["id"], "creator_name": member["name"], "anchor_date": first_due.isoformat(), "anchor_index": 0, "cadence": payload.recurrence, "weekly_day": weekly_day, "next_index": 1, "next_due_date": next_due.isoformat(), "priority": payload.priority, "note": task["note"], "active": True, "paused": False})
     data["tasks"].append(task)
     save_data(data)
+    background_tasks.add_task(send_member_push, data, payload.assignee_id, "New family task", task["title"], task["id"])
     return {"task": public_task(task, data["members"])}
+
+
+@app.post("/api/jobs/due-notifications")
+def send_due_notifications(request: Request) -> dict[str, int]:
+    expected = os.getenv("DUE_NOTIFICATION_JOB_TOKEN", "")
+    supplied = request.headers.get("authorization", "")
+    if not expected or not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if _firebase_messaging() is None:
+        raise HTTPException(status_code=503, detail="Push notifications are not configured")
+    notified = 0
+    for data in all_homes():
+        today_date = household_today(data)
+        today = today_date.isoformat()
+        changed = materialize_recurring_tasks(data, today_date)
+        for task in data.get("tasks", []):
+            if task.get("status") == "done" or task.get("due_date") != today or task.get("due_notification_sent_on") == today:
+                continue
+            delivered = send_member_push(data, task.get("assignee_id", ""), "Task due today", task.get("title", "A family task is due today"), task.get("id", ""))
+            if delivered:
+                task["due_notification_sent_on"] = today
+                changed = True
+                notified += 1
+        if changed:
+            save_home(data)
+    return {"tasks_notified": notified}
 
 
 @app.patch("/api/recurring/{series_id}")
