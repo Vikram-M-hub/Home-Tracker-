@@ -1158,7 +1158,8 @@ def create_task(payload: TaskInput, request: Request, background_tasks: Backgrou
 
 @app.post("/api/jobs/due-notifications")
 def send_due_notifications(request: Request) -> dict[str, int]:
-    expected = os.getenv("DUE_NOTIFICATION_JOB_TOKEN", "")
+    # Keep the existing Render secret name working for this scheduled job.
+    expected = os.getenv("DUE_NOTIFICATION_JOB_TOKEN") or os.getenv("REMINDER_JOB_TOKEN", "")
     supplied = request.headers.get("authorization", "")
     if not expected or not hmac.compare_digest(supplied, f"Bearer {expected}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
