@@ -337,8 +337,13 @@ def _b64(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode().rstrip("=")
 
 
-def make_token(member_id: str, household_id: str, profile_version: int = 0) -> str:
-    payload = _b64(json.dumps({"m": member_id, "h": household_id, "e": int(datetime.now(timezone.utc).timestamp()) + 60 * 60 * 24 * 30, "v": profile_version}).encode())
+def make_token(member_id: str, household_id: str, profile_version: int = 0, persistent: bool = False) -> str:
+    claims = {"m": member_id, "h": household_id, "v": profile_version}
+    if persistent:
+        claims["p"] = True
+    else:
+        claims["e"] = int(datetime.now(timezone.utc).timestamp()) + 60 * 60 * 24 * 30
+    payload = _b64(json.dumps(claims).encode())
     signature = _b64(hmac.new(TOKEN_SECRET, payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{signature}"
 
@@ -350,7 +355,7 @@ def read_token(token: str) -> dict[str, Any] | None:
         if not hmac.compare_digest(signature, expected):
             return None
         decoded = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-        if decoded["e"] < int(datetime.now(timezone.utc).timestamp()):
+        if decoded.get("p") is not True and decoded["e"] < int(datetime.now(timezone.utc).timestamp()):
             return None
         return decoded
     except (ValueError, KeyError, json.JSONDecodeError):
@@ -814,7 +819,7 @@ def public_household(household: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/login")
-def login(payload: LoginInput, response: Response) -> dict[str, Any]:
+def login(payload: LoginInput, request: Request, response: Response) -> dict[str, Any]:
     # Rate limit by profile so PIN guessing stays impractical even on a shared home network.
     import time
 
@@ -836,7 +841,8 @@ def login(payload: LoginInput, response: Response) -> dict[str, Any]:
         login_attempts[bucket] = attempts
         raise HTTPException(status_code=401, detail="That PIN did not match. Please try again.")
     login_attempts.pop(bucket, None)
-    response.set_cookie("family_session", make_token(member["id"], data["household"]["id"], member.get("session_version", 0)), httponly=True, secure=COOKIE_SECURE, samesite="lax", max_age=60 * 60 * 24 * 30)
+    persistent = request.headers.get("x-together-client") == "flutter-android"
+    response.set_cookie("family_session", make_token(member["id"], data["household"]["id"], member.get("session_version", 0), persistent=persistent), httponly=True, secure=COOKIE_SECURE, samesite="lax", **({} if persistent else {"max_age": 60 * 60 * 24 * 30}))
     return {"member": public_member(member), "household": public_household(data["household"])}
 
 
@@ -847,8 +853,13 @@ def logout(response: Response) -> dict[str, bool]:
 
 
 @app.get("/api/me")
-def me(request: Request) -> dict[str, Any]:
+def me(request: Request, response: Response) -> dict[str, Any]:
     member, data = current_member(request)
+    # Promote a still-valid session from older Android builds to an app session
+    # without expiry. The app stores the signed token locally and clears it on
+    # explicit sign-out; session_version still revokes it when access is reset.
+    if request.headers.get("x-together-client") == "flutter-android":
+        response.set_cookie("family_session", make_token(member["id"], data["household"]["id"], member.get("session_version", 0), persistent=True), httponly=True, secure=COOKIE_SECURE, samesite="lax")
     return {"member": public_member(member), "household": public_household(data["household"]), "members": [public_member(m) for m in data["members"]], "is_primary_organizer": member["id"] == primary_organizer_id(data), "primary_organizer_id": primary_organizer_id(data)}
 
 
