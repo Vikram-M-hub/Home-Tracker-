@@ -2,6 +2,16 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const state = {me: null, members: [], tasks: [], household: null, isPrimaryOrganizer: false, primaryOrganizerId: null, view: "mine", myFilter: "all", mySearch: "", familyFilter: "all", memberFilter: "all", familySearch: "", selectedProfile: null, createMode: "once"};
 const previewMode = new URLSearchParams(location.search).has("preview");
+const progressMessageCache = new Map();
+const progressMessages = {
+  empty: {title:"A clean slate.",copies:["No tasks here yet. Enjoy the quiet—or add the first one.","The board is taking a peaceful little nap. No tasks just yet.","Nothing to do on this list. Suspiciously calm, in the best way."]},
+  starting: {title:"A few wins are waiting.",copies:["Big-list energy. Start with the tiniest win.","One task at a time—the chores can’t all escape at once.","Plenty left to tackle, and every tick brings the list down a notch.","The tasks have formed a queue. You’ve got this."]},
+  building: {title:"The momentum is building.",copies:["Nice progress. The list is shrinking and it knows it.","Keep collecting those little wins—you’re finding your rhythm.","Good start! The remaining tasks are officially outnumbered by your progress.","Look at you, making the to-do list nervous."]},
+  halfway: {title:"Past the halfway mark.",copies:["More than halfway there. The finish line is in view.","You’ve built some real momentum. Keep it rolling.","The chores are losing ground—one more push.","Halfway plus! The remaining tasks should be a little worried."]},
+  homestretch: {title:"The home stretch!",copies:["So much done already. Just a few more wins to go.","The finish line is waving. You’re getting close.","Nearly there—the remaining chores are starting to sweat.","This list is almost ready to brag about you."]},
+  almost: {title:"Almost across the finish line.",copies:["Just a little left. One final push and you’re there.","So close! The last few tasks are probably negotiating.","One or two more wins and this list can take a well-earned nap.","You’re nearly done. The finish line is practically within high-five range."]},
+  complete: {title:"Everything is complete!",copies:["That’s the whole list. Time for a household high-five.","You cleared the board. The chores never saw it coming.","All done! Enjoy this rare and beautiful moment.","Every task is complete. You’ve earned a victory lap."]}
+};
 const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const initials = (name) => name.split(/\s+/).slice(0, 2).map(x => x[0]).join("").toUpperCase();
 
@@ -292,6 +302,34 @@ function renderTaskCards(tasks,family=false,openCompleted=false){
   }
   return html;
 }
+function progressFeedback(scope, done, total) {
+  let band;
+  if (!total) band = "empty";
+  else {
+    const percent = Math.round(done / total * 100);
+    band = percent === 100 ? "complete" : percent >= 90 ? "almost" : percent >= 75 ? "homestretch" : percent >= 50 ? "halfway" : percent >= 25 ? "building" : "starting";
+  }
+  const key = `${scope}:${band}`;
+  if (!progressMessageCache.has(key)) {
+    const choices = progressMessages[band].copies;
+    progressMessageCache.set(key, choices[Math.floor(Math.random() * choices.length)]);
+  }
+  return {title:progressMessages[band].title,copy:progressMessageCache.get(key)};
+}
+function renderProgressCard(mine) {
+  const familyView = state.view === "family";
+  const tasks = familyView ? state.tasks : mine;
+  const done = tasks.filter(task => task.status === "done").length;
+  const percent = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+  const feedback = progressFeedback(familyView ? "family" : "mine", done, tasks.length);
+  $("#hero-kicker").textContent = familyView ? "FAMILY BOARD PROGRESS" : "YOUR TASKS, AT A GLANCE";
+  $("#hero-title").textContent = feedback.title;
+  $("#hero-copy").textContent = feedback.copy;
+  $("#hero-progress").style.width = `${percent}%`;
+  $("#hero-percent").textContent = `${percent}%`;
+  $("#hero-progress-text").textContent = `${done} of ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} done`;
+  $("#hero-progress-track").setAttribute("aria-valuenow", String(percent));
+}
 function matchesTaskSearch(task, query) {
   if (!query) return true;
   const assignee = task.assignee?.name || state.members.find(member => member.id === task.assignee_id)?.name || "";
@@ -299,14 +337,9 @@ function matchesTaskSearch(task, query) {
 }
 function renderTasks() {
   const mine = state.tasks.filter(t => t.assignee_id === state.me.id);
-  const done = mine.filter(t => t.status === "done").length;
   const open = mine.filter(t => t.status !== "done").length;
-  const pct = mine.length ? Math.round(done / mine.length * 100) : 0;
   $("#my-count").textContent = open;
-  $("#hero-progress").style.width = `${pct}%`; $("#hero-percent").textContent = `${pct}%`;
-  $("#hero-progress-text").textContent = `${done} of ${mine.length} ${mine.length === 1 ? "task" : "tasks"} done`;
-  $("#hero-title").textContent = mine.length && done === mine.length ? "You did it!" : open === 0 ? "A fresh start." : open === 1 ? "One thing at a time." : "You’ve got this.";
-  $("#hero-copy").textContent = mine.length && done === mine.length ? "Everything on your list is taken care of." : open ? `${open} ${open === 1 ? "task is" : "tasks are"} waiting for you.` : "Small things add up. You’ve got this.";
+  renderProgressCard(mine);
   const {weekStart, weekEnd} = currentWeekRange();
   const myTasks = mine.filter(t => {
     const matchesFilter = state.myFilter === "all" || (state.myFilter === "due_week"
@@ -340,8 +373,6 @@ function renderTasks() {
     $("#family-no-results-copy").textContent=state.familySearch?"Try a different word or clear your search.":"Try another task filter or show all tasks.";
     $("#clear-family-search").textContent=state.familySearch?"Clear search":"Show all tasks";
   }
-  const allDone = state.tasks.filter(t => t.status === "done").length;
-  $("#family-progress-number").textContent = `${state.tasks.length ? Math.round(allDone / state.tasks.length * 100) : 0}%`;
   $("#family-stats").innerHTML = [{key:"todo",label:"To do",icon:"○"},{key:"in_progress",label:"In progress",icon:"◷"},{key:"done",label:"Done",icon:"✓"}].map(s => `<div class="stat-card stat-${s.key}"><span class="stat-icon">${s.icon}</span><span class="stat-value">${state.tasks.filter(t => t.status === s.key).length}</span><span class="stat-label">${s.label}</span></div>`).join("");
   $$(".task-check").forEach(button => button.addEventListener("click", () => updateStatus(button.dataset.task, button.dataset.next)));
   $$("[data-task-detail]").forEach(button => button.addEventListener("click", () => openTaskDetails(button.dataset.taskDetail)));
@@ -416,6 +447,7 @@ async function updateStatus(id, status) {
 function setView(view) {
   state.view = view; $("#my-home").classList.toggle("hidden", view !== "mine"); $("#family-home").classList.toggle("hidden", view !== "family");
   $$(".view-tab,.mobile-nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+  renderProgressCard(state.tasks.filter(task => task.assignee_id === state.me.id));
 }
 function closeAddTaskMenu(){const menu=$("#add-task-menu");menu.classList.add("hidden");$$(".add-task-trigger").forEach(button=>button.setAttribute("aria-expanded","false"));}
 function toggleAddTaskMenu(trigger){

@@ -120,11 +120,11 @@
           <button class="view-tab active" data-view="mine" type="button"><span class="tab-icon">◷</span> My tasks <span class="tab-count" id="my-count">0</span></button>
           <button class="view-tab" data-view="family" type="button"><span class="tab-icon">⌂</span> Family board</button>
         </nav>
+        <div class="hero-card" aria-label="Task completion progress">
+          <div class="hero-copy"><span class="hero-kicker" id="hero-kicker">YOUR TASKS, AT A GLANCE</span><h2 id="hero-title">A fresh start.</h2><p id="hero-copy" aria-live="polite">Small things add up. You’ve got this.</p><div class="hero-progress-label"><span id="hero-progress-text">0 of 0 tasks done</span><strong id="hero-percent">0%</strong></div><div class="hero-progress" id="hero-progress-track" role="progressbar" aria-label="Task completion" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="hero-progress"></span></div></div>
+          <div class="hero-art" aria-hidden="true"><div class="art-sun"></div><div class="art-home"><div class="art-roof"></div><div class="art-house"><span></span><i></i></div></div><div class="art-check">✓</div></div>
+        </div>
         <section id="my-home" class="my-home">
-          <div class="hero-card">
-            <div class="hero-copy"><span class="hero-kicker">YOUR DAY, AT A GLANCE</span><h2 id="hero-title">A fresh start.</h2><p id="hero-copy">Small things add up. You’ve got this.</p><div class="hero-progress-label"><span id="hero-progress-text">0 of 0 tasks done</span><strong id="hero-percent">0%</strong></div><div class="hero-progress"><span id="hero-progress"></span></div></div>
-            <div class="hero-art" aria-hidden="true"><div class="art-sun"></div><div class="art-home"><div class="art-roof"></div><div class="art-house"><span></span><i></i></div></div><div class="art-check">✓</div></div>
-          </div>
           <label class="task-search"><span aria-hidden="true">⌕</span><input id="my-task-search" type="search" placeholder="Search your tasks" aria-label="Search your tasks"></label>
           <div class="my-task-filters" role="group" aria-label="Filter your tasks"><button class="filter-chip selected" data-my-filter="all" type="button">All tasks</button><button class="filter-chip" data-my-filter="due_week" type="button">Due this week</button><button class="filter-chip" data-my-filter="todo" type="button">To do</button><button class="filter-chip" data-my-filter="in_progress" type="button">In progress</button><button class="filter-chip" data-my-filter="done" type="button">Done</button></div>
           <div class="section-heading"><div><h2>Your tasks</h2><p id="my-task-summary">Things assigned to you</p></div></div>
@@ -133,7 +133,7 @@
           <div id="my-no-results" class="empty-state hidden"><h3>No matching tasks</h3><p>Try a different word or clear your search.</p><button class="button button-secondary" id="clear-my-search" type="button">Clear search</button></div>
         </section>
         <section id="family-home" class="family-home hidden">
-          <div class="family-summary"><div><h2 id="family-title">The family board</h2><p>Everyone’s tasks, all in one place.</p></div><div class="family-total"><strong id="family-progress-number">0%</strong><span>tasks complete</span></div></div>
+          <div class="family-summary"><div><h2 id="family-title">The family board</h2><p>Everyone’s tasks, all in one place.</p></div></div>
           <div class="family-stats" id="family-stats"></div>
           <div id="member-notices" class="member-notices hidden"></div>
           <label class="task-search family-task-search"><span aria-hidden="true">⌕</span><input id="family-task-search" type="search" placeholder="Search family tasks" aria-label="Search family tasks"></label>
@@ -329,6 +329,6 @@
       <div class="help-footer"><a href="/data-deletion" target="_blank" rel="noopener">How to delete a profile or home</a><a href="/privacy" target="_blank" rel="noopener">Privacy policy</a></div>
     </div>
   </dialog>
-  <script src="assets/app.js?v=web-features-4" defer></script>
+  <script src="assets/app.js?v=progress-card-v1" defer></script>
 </body>
 </html>
